@@ -13,6 +13,7 @@ export interface Photo {
   id: string;
   src: string;
   description: string;
+  observacoes: string; // Adicionado e sincronizado
 }
 
 export interface ReportData {

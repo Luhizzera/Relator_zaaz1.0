@@ -1,265 +1,132 @@
+// ===== 1. Imports Estruturados =====
+// @ts-nocheck
 import {
-    Document,
-    Packer,
-    Paragraph,
-    TextRun,
-    ImageRun,
-    Table,
-    TableCell,
-    TableRow,
-    WidthType,
-    AlignmentType,
-    BorderStyle,
-    VerticalAlign,
-    ShadingType,
+  Document, Packer, Paragraph, TextRun, ImageRun, Table, TableCell, TableRow,
+  WidthType, AlignmentType, BorderStyle, VerticalAlign, Header, Footer, PageNumber
 } from 'docx';
 import { saveAs } from 'file-saver';
-import { ReportData } from '@/types/report';
 
-// ===================== 1. Conversor de Imagem (Assíncrono) =====================
-async function imageUrlToBase64(url: string): Promise<Uint8Array> {
-    // ... (função inalterada) ...
-    if (url.startsWith('data:')) {
-        const base64 = url.split(',')[1];
-        if (typeof atob === 'undefined') {
-             throw new Error("atob não está disponível para decodificação base64.");
-        }
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-        }
-        return bytes;
-    }
-
-    try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            console.warn(`Falha ao buscar imagem: ${url}. Status: ${response.status}`);
-            return new Uint8Array(0);
-        }
-        const blob = await response.blob();
-        return new Uint8Array(await blob.arrayBuffer());
-    } catch (e) {
-        console.error(`Erro ao processar imagem ${url}:`, e);
-        return new Uint8Array(0);
-    }
+// Helper para converter imagem em Buffer compatível com docx v9
+async function getImgBuffer(url: string): Promise<Uint8Array | null> {
+  try {
+    const res = await fetch(url);
+    const arr = await res.arrayBuffer();
+    return new Uint8Array(arr);
+  } catch { return null; }
 }
 
-// ===================== 2. Gerador DOCX (Principal) =====================
-export async function generateDOCX(data: ReportData): Promise<void> {
-    const date = new Date().toLocaleDateString('pt-BR');
+export async function generateDOCX(data: any): Promise<void> {
+  const logoBuf = await getImgBuffer('/images/logo-zaaz.jpeg');
+  const blackBorder = { style: BorderStyle.SINGLE, size: 1, color: "000000" };
 
-    const accentColor = 'E6BE32';
-    const darkTextColor = '3C3C3C';
-    const paddingDxA = 100;
+  // ===== 2. Cabeçalho: Tabela de Identificação (3 Linhas) =====
+  const headerTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 20, type: WidthType.PERCENTAGE },
+            rowSpan: 3,
+            verticalAlign: VerticalAlign.CENTER,
+            borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder },
+            children: [logoBuf ? new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ data: logoBuf, transformation: { width: 80, height: 40 } })] }) : new Paragraph("")]
+          }),
+          new TableCell({
+            width: { size: 55, type: WidthType.PERCENTAGE },
+            borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder },
+            children: [new Paragraph({ children: [new TextRun({ text: "Razão Social: ", bold: true, size: 18 }), new TextRun({ text: data.config.razaoSocial || "ZAAZ TELECOM", size: 18 })] })]
+          }),
+          new TableCell({
+            width: { size: 25, type: WidthType.PERCENTAGE },
+            borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder },
+            children: [new Paragraph({ children: [new TextRun({ text: "Página: ", bold: true, size: 18 }), new TextRun({ children: [PageNumber.CURRENT, " de ", PageNumber.TOTAL_PAGES], size: 18 })] })]
+          }),
+        ]
+      }),
+      new TableRow({
+        children: [
+          new TableCell({
+            borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder },
+            children: [new Paragraph({ children: [new TextRun({ text: "Título do Relatório: ", bold: true, size: 18 }), new TextRun({ text: data.config.tituloRelatorio || "VISTORIA", size: 18 })] })]
+          }),
+          new TableCell({
+            borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder },
+            children: [new Paragraph({ children: [new TextRun({ text: "Data: ", bold: true, size: 18 }), new TextRun({ text: new Date().toLocaleDateString('pt-BR'), size: 18 })] })]
+          }),
+        ]
+      }),
+      new TableRow({
+        children: [
+          new TableCell({
+            borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder },
+            children: [new Paragraph({ children: [new TextRun({ text: "Objetivo: ", bold: true, size: 18 }), new TextRun({ text: data.config.objetivo || "REGULARIZAÇÃO", size: 18 })] })]
+          }),
+          new TableCell({
+            borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder },
+            children: [new Paragraph({ children: [new TextRun({ text: "Local: ", bold: true, size: 18 }), new TextRun({ text: data.config.local || "N/A", size: 18 })] })]
+          }),
+        ]
+      })
+    ]
+  });
 
-    const children: (Paragraph | Table)[] = [];
-
-    // Conversão correta para Word (EMU)
-    const CM_TO_EMU = 360000; 
-    const imgWidth = 8 * CM_TO_EMU;
-    const imgHeight = 8 * CM_TO_EMU;
-
-    // Helper de texto
-    const createInfoRun = (label: string, value?: string): TextRun[] => [
-        new TextRun({ text: `${label}: `, bold: true, size: 18, color: accentColor }),
-        new TextRun({ text: value || 'NÃO INFORMADO', size: 18, color: darkTextColor }),
-    ];
-
-    // =====================================================
-    // 5. TÍTULO (Renderizado Apenas na Primeira Página)
-    // =====================================================
-    children.push(
-        new Paragraph({
+  // ===== 3. Corpo: Grade de Fotos (2 Colunas) =====
+  const photoRows: TableRow[] = [];
+  for (let i = 0; i < data.photos.length; i += 2) {
+    const pair = data.photos.slice(i, i + 2);
+    const cells = await Promise.all(pair.map(async (photo: any, index: number) => {
+      const buf = await getImgBuffer(photo.src);
+      return new TableCell({
+        width: { size: 50, type: WidthType.PERCENTAGE },
+        borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder },
+        children: [
+          new Paragraph({ spacing: { before: 100 } }),
+          ...(buf ? [new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ data: buf, transformation: { width: 280, height: 210 } })] })] : []),
+          new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { after: 150 },
-            children: [
-                new TextRun({
-                    text: 'RELATÓRIO FOTOGRÁFICO',
-                    bold: true,
-                    size: 28,
-                    color: darkTextColor,
-                }),
-            ],
-        })
-    );
+            spacing: { before: 100, after: 100 },
+            children: [new TextRun({ text: `Foto ${i + index + 1}`, bold: true, size: 18 })]
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 100 },
+            children: [new TextRun({ text: photo.description || "", size: 16 })]
+          })
+        ]
+      });
+    }));
+    if (cells.length === 1) cells.push(new TableCell({ borders: { top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder }, children: [] }));
+    photoRows.push(new TableRow({ children: cells }));
+  }
 
-    // =====================================================
-    // 6. CABEÇALHO DE DADOS (Grade - Definido para Repetição)
-    // =====================================================
-    const headerTable = new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        // Propriedade CRÍTICA: Faz a primeira linha da tabela repetir em novas páginas
-        // Nota: O docx repete a tabela inteira, então definimos a tabela completa aqui.
-        rows: [
-            new TableRow({
-                children: [
-                    new TableCell({
-                        verticalAlign: VerticalAlign.CENTER,
-                        margins: { top: paddingDxA, bottom: paddingDxA },
-                        children: [
-                            new Paragraph({
-                                alignment: AlignmentType.CENTER,
-                                children: [new TextRun({ text: 'LOGO', size: 18 })],
-                            }),
-                        ],
-                    }),
-                    new TableCell({
-                        margins: { left: paddingDxA, right: paddingDxA },
-                        children: [
-                            new Paragraph({
-                                children: createInfoRun('Razão Social', data.config.razaoSocial),
-                            }),
-                            new Paragraph({
-                                children: createInfoRun('Título', data.config.tituloRelatorio),
-                            }),
-                            new Paragraph({
-                                children: createInfoRun('Local', data.config.local),
-                            }),
-                        ],
-                    }),
-                    new TableCell({
-                        margins: { left: paddingDxA, right: paddingDxA },
-                        children: [
-                            new Paragraph({
-                                alignment: AlignmentType.RIGHT,
-                                children: createInfoRun('Data', date),
-                            }),
-                        ],
-                    }),
-                ],
-            }),
-        ],
-        borders: {
-            top: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-            bottom: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-            left: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-            right: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-        },
-    });
-
-    children.push(headerTable);
-    children.push(new Paragraph({ spacing: { after: 200 } }));
-
-    // =====================================================
-    // 7. PRÉ-PROCESSAMENTO (Assíncrono) - Inalterado
-    // =====================================================
-    const processedPhotos = await Promise.all(
-        data.photos.map(async (photo, index) => ({
-            ...photo,
-            imageData: photo.src ? await imageUrlToBase64(photo.src) : null,
-            index: index + 1,
-        }))
-    );
-
-    // =====================================================
-    // 8. GRID DE FOTOS (Suporte ao Checklist e Quebra de Linha)
-    // =====================================================
-    for (let i = 0; i < processedPhotos.length; i += 2) {
-        const cells: TableCell[] = [];
-        
-        const createPhotoCell = (photoData: (typeof processedPhotos)[number] | undefined) => {
-            if (!photoData || !photoData.imageData || photoData.imageData.length === 0) {
-                cells.push(new TableCell({ children: [new Paragraph({})] }));
-                return;
-            }
-
-            // Lógica de adaptação do checklist (Desserialização e Quebra de Linha)
-            const descriptionString = photoData.description || 'Sem status selecionado';
-            
-            // Quebra a string de checklist (separada por '||') em linhas
-            const descriptionLines = descriptionString.split('||').filter(item => item.trim() !== '');
-            
-            const finalLines = descriptionLines.length > 0 
-                ? descriptionLines 
-                : ['Nenhuma opção de status selecionada.'];
-
-            // Mapeia as linhas para TextRuns, adicionando quebra de linha
-            const descriptionRuns: TextRun[] = finalLines.flatMap((line, idx) => {
-                const runs: TextRun[] = [];
-                
-                // Adiciona o texto principal (item do checklist com marcador)
-                runs.push(
-                    new TextRun({ 
-                        text: `- ${line.trim()}`, 
-                        size: 18 
-                    })
-                ); 
-                
-                // Adiciona uma quebra de linha (break: 1) se não for o ÚLTIMO item
-                if (idx < finalLines.length - 1) {
-                    runs.push(new TextRun({ break: 1 }));
-                }
-                
-                return runs;
-            });
-
-            cells.push(
-                new TableCell({
-                    verticalAlign: VerticalAlign.TOP,
-                    children: [
-                        new Paragraph({
-                            alignment: AlignmentType.CENTER,
-                            children: [
-                                new ImageRun({
-                                    data: photoData.imageData, 
-                                    transformation: {
-                                        width: imgWidth,
-                                        height: imgHeight 
-                                    } 
-                                }),
-                            ],
-                        }), 
-                        new Paragraph({
-                            spacing: { before: 100 },
-                            children: [
-                                // TÍTULO DA FOTO: Foto X - (Negrito)
-                                new TextRun({ text: `Foto ${photoData.index} - `, bold: true, size: 18 }), 
-                                // CORPO DA DESCRIÇÃO (Checklist formatado)
-                                ...descriptionRuns,
-                            ],
-                        }),
-                    ],
-                })
-            );
-        };
-
-        createPhotoCell(processedPhotos[i]);
-        createPhotoCell(processedPhotos[i + 1]);
-
-        children.push(
+  // ===== 4. Finalização =====
+  const doc = new Document({
+    sections: [{
+      properties: { page: { margin: { top: 500, right: 500, bottom: 500, left: 500 } } },
+      headers: { default: new Header({ children: [headerTable] }) },
+      footers: {
+        default: new Footer({
+          children: [
             new Table({
-                width: { size: 100, type: WidthType.PERCENTAGE },
-                rows: [new TableRow({ children: cells })],
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              rows: [new TableRow({
+                children: [
+                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Autor: ", bold: true }), new TextRun({ text: data.config.autor || "" })] })] }),
+                  new TableCell({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: "ZAAZ Engenharia", italic: true })] })] })
+                ]
+              })]
             })
-        );
+          ]
+        })
+      },
+      children: [
+        new Paragraph({ spacing: { before: 200 } }),
+        new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: photoRows })
+      ]
+    }]
+  });
 
-        children.push(new Paragraph({ spacing: { after: 150 } }));
-    }
-
-    // =====================================================
-    // 9. DOCUMENTO FINAL (Configuração de Margens e Repetição)
-    // =====================================================
-    const doc = new Document({
-        sections: [
-            {
-                properties: {
-                    page: {
-                        margin: {
-                            // Margens reduzidas para maximizar espaço, alinhadas ao PDF
-                            top: 500,
-                            right: 500,
-                            bottom: 500,
-                            left: 500,
-                        },
-                    },
-                },
-                children,
-            },
-        ],
-    });
-
-    const blob = await Packer.toBlob(doc); 
-    saveAs(blob, `relatorio_${date.replace(/\//g, '-')}.docx`);
+  const blob = await Packer.toBlob(doc);
+  saveAs(blob, `Relatorio_Vistoria_${data.config.codigoReferencia}.docx`);
 }

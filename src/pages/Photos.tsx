@@ -10,14 +10,11 @@ import { ExportModal } from '@/components/ExportModal';
 import { toast } from '@/hooks/use-toast';
 
 // =======================================================
-// CORREÇÃO FINAL: Resolução Aumentada para Melhor Qualidade
-// Retornado para 1000px. O travamento por salvamento síncrono foi resolvido no Contexto.
+// CONSTANTES E FUNÇÃO AUXILIAR DE IMAGEM
 const MAX_HEIGHT_PX = 1000; 
-// =======================================================
-
-// ===== FUNÇÃO AUXILIAR: Corrige Orientação e Redimensiona a Imagem no Canvas (Mantida) =====
+// ... (getOrientationCorrectedBase64 mantida inalterada)
 const getOrientationCorrectedBase64 = (file: File): Promise<string> => {
-    // ... (Lógica que utiliza MAX_HEIGHT_PX mantida, mas agora 1000px)
+    // ... (função inalterada)
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (readerEvent) => {
@@ -29,7 +26,6 @@ const getOrientationCorrectedBase64 = (file: File): Promise<string> => {
                 let width = img.naturalWidth;
                 let height = img.naturalHeight;
 
-                // 1. CALCULAR REDIMENSIONAMENTO SE NECESSÁRIO
                 if (height > MAX_HEIGHT_PX) {
                     width = (width * MAX_HEIGHT_PX) / height;
                     height = MAX_HEIGHT_PX;
@@ -38,14 +34,12 @@ const getOrientationCorrectedBase64 = (file: File): Promise<string> => {
                 canvas.width = width;
                 canvas.height = height;
 
-                // 2. DESENHAR NO CANVAS (Corrige EXIF e Redimensiona)
                 if (ctx) {
                     ctx.drawImage(img, 0, 0, width, height);
                 } else {
                     return reject(new Error("Canvas context is unavailable."));
                 }
 
-                // 3. RETORNAR O NOVO Base64 (Com resolução reduzida)
                 resolve(canvas.toDataURL('image/jpg', 0.9)); 
             };
             img.onerror = () => reject(new Error("Image failed to load."));
@@ -62,18 +56,15 @@ const getOrientationCorrectedBase64 = (file: File): Promise<string> => {
     });
 };
 
-
 export default function Photos() {
   const navigate = useNavigate();
-  const { photos, addPhoto, updatePhotoDescription, removePhoto, config, clearAllPhotos } = useReport();
+  const { photos, addPhoto, updatePhotoDescription, removePhoto, config, clearAllPhotos } = useReport(); 
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConfirmDeleteAllOpen, setIsConfirmDeleteAllOpen] = useState(false); 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoGalleryRef = useRef<HTMLDivElement>(null); 
-
-  // ... (Funções e Lógica de Renderização Mantidas)
 
   const formatPhotoCount = (count: number) => {
     if (count === 0) return 'Nenhuma foto adicionada';
@@ -102,6 +93,7 @@ export default function Photos() {
                 id: `photo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 src: correctedSrc,
                 description: '', 
+                observacoes: '', // Inicialização do campo para evitar erros
             });
         } catch (error) {
             console.error('Error correcting image orientation:', error);
@@ -257,8 +249,11 @@ export default function Photos() {
         <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
           
           <aside className="order-2 lg:order-1 lg:w-72 space-y-3 sm:space-y-4">
+            
             <div className="bg-card rounded-lg border border-border p-3 sm:p-4 shadow-sm">
               <h2 className="font-semibold text-card-foreground mb-3 sm:mb-4 text-sm sm:text-base">Controles</h2>
+              
+              {/* ... (Controles de Câmera/Upload) ... */}
 
               <div className="flex items-center justify-between mb-3 sm:mb-4">
                 <div className="flex items-center gap-2">

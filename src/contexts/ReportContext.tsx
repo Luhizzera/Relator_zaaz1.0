@@ -24,7 +24,9 @@ const initializeConfig = (): ReportConfig => {
   try {
     const saved = localStorage.getItem(REPORT_CONFIG_STORAGE_KEY);
     if (saved) {
-      return { ...defaultConfig, ...JSON.parse(saved) };
+      const loadedConfig = JSON.parse(saved);
+      // Garante que o objeto retornado tenha todos os campos padrão, caso o localStorage seja antigo
+      return { ...defaultConfig, ...loadedConfig }; 
     }
   } catch (e) {
     console.error('Erro ao carregar config:', e);
@@ -38,6 +40,7 @@ interface ReportContextType {
   photos: Photo[];
   addPhoto: (photo: Photo) => void;
   updatePhotoDescription: (id: string, description: string) => void;
+  updatePhotoObservacoes: (id: string, observacoes: string) => void; 
   removePhoto: (id: string) => void;
   clearAllPhotos: () => void;
   getReportData: () => ReportData;
@@ -57,13 +60,26 @@ export function ReportProvider({ children }: { children: ReactNode }) {
     );
   }, [config]);
 
-  const addPhoto = (photo: Photo) => {
-    setPhotos((prev) => [...prev, photo]);
+  const addPhoto = (newPhoto: Photo) => {
+    setPhotos((prev) => [
+      ...prev, 
+      { 
+        ...newPhoto,
+        description: newPhoto.description || '',
+        observacoes: newPhoto.observacoes || '', // Inicialização
+      }
+    ]);
   };
 
   const updatePhotoDescription = (id: string, description: string) => {
     setPhotos((prev) =>
       prev.map((p) => (p.id === id ? { ...p, description } : p))
+    );
+  };
+  
+  const updatePhotoObservacoes = (id: string, observacoes: string) => {
+    setPhotos((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, observacoes } : p))
     );
   };
 
@@ -93,6 +109,7 @@ export function ReportProvider({ children }: { children: ReactNode }) {
         photos,
         addPhoto,
         updatePhotoDescription,
+        updatePhotoObservacoes,
         removePhoto,
         clearAllPhotos,
         getReportData,
