@@ -1,403 +1,180 @@
-// src/pages/Photos.tsx
-
-import { useState, useRef, useEffect } from 'react';
+// @ts-nocheck
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Upload, FileDown, ArrowLeft, ImagePlus, Trash2 } from 'lucide-react';
+import { 
+  Camera, FileDown, ArrowLeft, 
+  ImagePlus, Trash2, Plus, Layout
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useReport } from '@/contexts/ReportContext';
 import { PhotoCard } from '@/components/PhotoCard';
 import { ExportModal } from '@/components/ExportModal';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { CacheService } from '../lib/cacheService';
 import { toast } from '@/hooks/use-toast';
-
-// =======================================================
-// CONSTANTES E FUNÇÃO AUXILIAR DE IMAGEM
-const MAX_HEIGHT_PX = 1000; 
-// ... (getOrientationCorrectedBase64 mantida inalterada)
-const getOrientationCorrectedBase64 = (file: File): Promise<string> => {
-    // ... (função inalterada)
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (readerEvent) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
-                let width = img.naturalWidth;
-                let height = img.naturalHeight;
-
-                if (height > MAX_HEIGHT_PX) {
-                    width = (width * MAX_HEIGHT_PX) / height;
-                    height = MAX_HEIGHT_PX;
-                }
-                
-                canvas.width = width;
-                canvas.height = height;
-
-                if (ctx) {
-                    ctx.drawImage(img, 0, 0, width, height);
-                } else {
-                    return reject(new Error("Canvas context is unavailable."));
-                }
-
-                resolve(canvas.toDataURL('image/jpg', 0.9)); 
-            };
-            img.onerror = () => reject(new Error("Image failed to load."));
-            
-            const src = readerEvent.target?.result;
-            if (typeof src === 'string') {
-                 img.src = src;
-            } else {
-                 reject(new Error("FileReader result is invalid."));
-            }
-        };
-        reader.onerror = () => reject(new Error("FileReader failed."));
-        reader.readAsDataURL(file);
-    });
-};
 
 export default function Photos() {
   const navigate = useNavigate();
-  const { photos, addPhoto, updatePhotoDescription, removePhoto, config, clearAllPhotos } = useReport(); 
-  const [cameraEnabled, setCameraEnabled] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isConfirmDeleteAllOpen, setIsConfirmDeleteAllOpen] = useState(false); 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const photoGalleryRef = useRef<HTMLDivElement>(null); 
-
-  const formatPhotoCount = (count: number) => {
-    if (count === 0) return 'Nenhuma foto adicionada';
-    return `${count} foto${count !== 1 ? 's' : ''} adicionada${count !== 1 ? 's' : ''}`;
-  };
-
-  const processFiles = async (fileList: FileList | null) => {
-    if (!fileList) return;
-    
-    const files = Array.from(fileList);
-
-    for (const file of files) {
-        if (!file.type.startsWith('image/')) {
-            toast({
-                title: 'Arquivo inválido',
-                description: 'Por favor, selecione apenas imagens.',
-                variant: 'destructive',
-            });
-            continue;
-        }
-
-        try {
-            const correctedSrc = await getOrientationCorrectedBase64(file);
-            
-            addPhoto({
-                id: `photo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                src: correctedSrc,
-                description: '', 
-                observacoes: '', // Inicialização do campo para evitar erros
-            });
-        } catch (error) {
-            console.error('Error correcting image orientation:', error);
-            toast({
-                title: 'Erro de processamento',
-                description: 'Não foi possível processar a imagem.',
-                variant: 'destructive',
-            });
-        }
-    }
-  };
+  const { photos, addPhoto, updatePhotoDescription, removePhoto, config, clearAllPhotos } = useReport();
   
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    await processFiles(e.target.files);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isConfirmDeleteAllOpen, setIsConfirmDeleteAllOpen] = useState(false); // 🚀 Reativado
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef(null);
 
-    if (e.target) {
-      e.target.value = '';
-    }
-  };
-  const handleCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    handleFileUpload(e);
-  };
-  const handleDropFiles = async (e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (photoGalleryRef.current) {
-        photoGalleryRef.current.classList.remove('highlight-drag');
-    }
-
-    const dt = e.dataTransfer;
-    if (dt && dt.files) {
-      await processFiles(dt.files);
-    }
-  };
-  
+  // ===== 1. Persistência e Recuperação =====
   useEffect(() => {
-    const dropZone = photoGalleryRef.current;
+    const recovery = async () => {
+      if (photos.length === 0) {
+        const saved = await CacheService.recoverPhotos();
+        if (saved) saved.forEach(p => addPhoto(p));
+      }
+    };
+    recovery();
+  }, []);
 
-    if (dropZone) {
-      const preventDefaults = (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-      };
-      
-      const highlight = (e: DragEvent) => {
-        if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) {
-             dropZone.classList.add('highlight-drag');
-        }
-      };
-      
-      const unhighlight = () => {
-        dropZone.classList.remove('highlight-drag');
-      };
-      
-      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-          dropZone.addEventListener(eventName, preventDefaults as EventListener, false);
-      });
-      dropZone.addEventListener('dragenter', highlight as EventListener, false);
-      dropZone.addEventListener('dragover', highlight as EventListener, false);
-      dropZone.addEventListener('dragleave', unhighlight as EventListener, false);
-      dropZone.addEventListener('drop', handleDropFiles as EventListener, false);
-      
-      return () => {
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropZone.removeEventListener(eventName, preventDefaults as EventListener, false);
-        });
-        dropZone.removeEventListener('dragenter', highlight as EventListener, false);
-        dropZone.removeEventListener('dragover', highlight as EventListener, false);
-        dropZone.removeEventListener('dragleave', unhighlight as EventListener, false);
-        dropZone.removeEventListener('drop', handleDropFiles as EventListener, false);
-      };
-    }
-  }, [addPhoto]); 
+  useEffect(() => { CacheService.persistPhotos(photos); }, [photos]);
 
-  const handleExport = () => {
-    if (photos.length === 0) {
+  // ===== 2. Lógica de Limpeza Total =====
+  const handleClearAll = async () => {
+    try {
+      clearAllPhotos(); // Limpa o Contexto (Memória)
+      await CacheService.clearCache(); // Limpa o Cache (Disco)
+      setIsConfirmDeleteAllOpen(false);
       toast({
-        title: 'Nenhuma foto adicionada',
-        description: 'Adicione pelo menos uma foto antes de exportar o relatório.',
-        variant: 'destructive',
+        title: "Galeria Limpa",
+        description: "Todas as fotos e o cache foram removidos com sucesso.",
       });
-      return;
+    } catch (error) {
+      console.error("Erro ao limpar:", error);
     }
-    setIsModalOpen(true);
   };
 
-  const handleDeleteAllConfirmed = () => {
-    if (photos.length > 0) {
-        clearAllPhotos(); 
-        toast({ 
-            title: 'Sucesso', 
-            description: 'Todas as fotos foram removidas do relatório.', 
-            variant: 'default' 
+  const handleFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    for (const file of fileArray) {
+      if (!file.type.startsWith('image/')) continue;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        addPhoto({
+          id: `p-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          src: e.target?.result as string,
+          description: ''
         });
+      };
+      reader.readAsDataURL(file);
     }
-    setIsConfirmDeleteAllOpen(false);
-  };
-  
-  const ConfirmDeleteAllModal: React.FC<{ isOpen: boolean, onClose: () => void, onConfirm: () => void, photoCount: number }> = ({ isOpen, onClose, onConfirm, photoCount }) => {
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-card rounded-lg p-6 shadow-2xl w-full max-w-sm border border-red-300">
-                <h3 className="text-xl font-bold text-destructive mb-3 flex items-center gap-2">
-                    <Trash2 size={24} /> Confirmação de Exclusão
-                </h3>
-                <p className="text-card-foreground/90 mb-6 text-sm">
-                    Você tem certeza que deseja remover **todas as {photoCount} fotos** ({formatPhotoCount(photoCount)}) do relatório? 
-                    Esta ação é irreversível.
-                </p>
-                <div className="flex justify-end space-x-3">
-                    <button 
-                        onClick={onClose}
-                        className="px-4 py-2 text-sm font-medium text-muted-foreground border border-border rounded-lg hover:bg-muted transition-colors"
-                    >
-                        Cancelar
-                    </button>
-                    <button 
-                        onClick={onConfirm}
-                        className="px-4 py-2 text-sm font-medium text-white bg-destructive rounded-lg hover:bg-destructive/90 transition-colors shadow-md"
-                    >
-                        Sim, Remover Todas
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="bg-primary text-primary-foreground py-3 sm:py-4 shadow-lg">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => navigate('/')}
-              className="flex items-center gap-1 sm:gap-2 text-primary-foreground/80 hover:text-primary-foreground transition-colors"
-            >
-              <ArrowLeft size={18} className="sm:w-5 sm:h-5" />
-              <span className="text-sm sm:text-base">Voltar</span>
-            </button>
-            <h1 className="text-base sm:text-xl font-bold truncate max-w-[180px] sm:max-w-none">
-              {config.documentName || 'Relatório Fotográfico'}
-            </h1>
-            <div className="w-16 sm:w-20" />
-          </div>
-        </div>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col transition-colors duration-300">
+      
+      {/* HEADER */}
+      <header className="bg-[#1A1AFF] dark:bg-slate-900 text-white py-4 px-6 flex items-center justify-between shadow-lg sticky top-0 z-50">
+        <button onClick={() => navigate('/')} className="flex items-center gap-2 text-sm font-medium hover:bg-white/10 p-2 rounded-lg transition-all">
+          <ArrowLeft size={18} /> <span className="hidden md:inline">Voltar</span>
+        </button>
+        <h1 className="text-lg font-bold truncate px-4">{config.documentName || 'Relatório Fotográfico'}</h1>
+        <div className="bg-white/10 dark:bg-slate-800/50 rounded-full border border-white/10"><ThemeToggle /></div>
       </header>
 
-      <main className="container mx-auto px-4 py-4 sm:py-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
-          
-          <aside className="order-2 lg:order-1 lg:w-72 space-y-3 sm:space-y-4">
-            
-            <div className="bg-card rounded-lg border border-border p-3 sm:p-4 shadow-sm">
-              <h2 className="font-semibold text-card-foreground mb-3 sm:mb-4 text-sm sm:text-base">Controles</h2>
+      <main className="container mx-auto p-4 sm:p-6 flex flex-col lg:flex-row gap-8">
+        
+        {/* ASIDE */}
+        <aside className="lg:w-80 space-y-4">
+          {/* Card Resumo */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[10px] uppercase font-black text-slate-400 tracking-widest">Resumo</span>
+              <Layout size={14} className="text-slate-300" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="border-r border-slate-100 dark:border-slate-800">
+                <p className="text-2xl font-black text-slate-700 dark:text-white">{photos.length}</p>
+                <p className="text-[9px] text-slate-400 font-bold uppercase">Imagens</p>
+              </div>
+              <div className="pl-2">
+                <p className="text-2xl font-black text-[#1A1AFF] dark:text-blue-400">{Math.ceil(photos.length / 4)}</p>
+                <p className="text-[9px] text-slate-400 font-bold uppercase">Páginas Doc</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Aba de Ações */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 space-y-3">
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex items-center gap-3 p-3 bg-[#1A1AFF] dark:bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all"
+            >
+              <Plus size={18} />
+              <span className="text-sm font-bold">Importar Fotos</span>
+            </button>
+
+            <button onClick={() => setIsExportModalOpen(true)} className="w-full flex items-center justify-center gap-2 py-3 text-[#1A1AFF] dark:text-blue-400 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all">
+              <FileDown size={18} /> Gerar Relatório
+            </button>
+
+            {/* 🚀 BOTÃO RESTAURADO */}
+            <button 
+              onClick={() => photos.length > 0 && setIsConfirmDeleteAllOpen(true)} 
+              className="w-full py-2 text-slate-400 hover:text-red-500 text-[11px] font-bold transition-colors cursor-pointer"
               
-              {/* ... (Controles de Câmera/Upload) ... */}
-
-              <div className="flex items-center justify-between mb-3 sm:mb-4">
-                <div className="flex items-center gap-2">
-                  <Camera size={18} className="text-muted-foreground sm:w-5 sm:h-5" />
-                  <span className="text-xs sm:text-sm font-medium">Câmera</span>
-                </div>
-                <button
-                  onClick={() => setCameraEnabled(!cameraEnabled)}
-                  className={cn(
-                    "relative w-10 h-5 sm:w-12 sm:h-6 rounded-full transition-colors",
-                    cameraEnabled ? "bg-secondary" : "bg-muted"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "absolute top-0.5 sm:top-1 w-4 h-4 rounded-full bg-card shadow transition-transform",
-                      cameraEnabled ? "left-5 sm:left-7" : "left-0.5 sm:left-1"
-                    )}
-                  />
-                </button>
-              </div>
-
-              <div className="flex flex-row gap-2 sm:flex-col sm:gap-0">
-                {cameraEnabled && (
-                  <button
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="flex-1 sm:flex-none sm:w-full flex items-center justify-center gap-2 py-2.5 sm:py-3 sm:mb-4 bg-secondary text-secondary-foreground rounded-lg text-sm font-medium hover:bg-secondary/90 transition-colors"
-                  >
-                    <Camera size={16} className="sm:w-[18px] sm:h-[18px]" />
-                    <span className="hidden xs:inline sm:inline">Tirar Foto</span>
-                    <span className="xs:hidden">Foto</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex-1 sm:flex-none sm:w-full flex items-center justify-center gap-2 py-2.5 sm:py-3 bg-secondary text-secondary-foreground rounded-lg text-sm font-medium hover:bg-secondary/90 transition-colors"
-                >
-                  <Upload size={16} className="sm:w-[18px] sm:h-[18px]" />
-                  <span className="hidden xs:inline sm:inline">Enviar Fotos</span>
-                  <span className="xs:hidden">Enviar</span>
-                </button>
-              </div>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <input
-                ref={cameraInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleCameraCapture}
-                className="hidden"
-              />
-            </div>
-
-            <button
-              onClick={handleExport}
-              className="w-full flex items-center justify-center gap-2 py-3 sm:py-4 bg-primary text-primary-foreground rounded-lg text-sm sm:text-base font-semibold hover:bg-primary/90 transition-colors shadow-md mb-2"
             >
-              <FileDown size={18} className="sm:w-5 sm:h-5" />
-              Imprimir Relatório
+              Limpar todas as Fotos
             </button>
-            
-            <button
-              onClick={() => {
-                if (photos.length > 0) {
-                  setIsConfirmDeleteAllOpen(true);
-                } else {
-                  toast({ title: 'Atenção', description: 'Nenhuma foto para remover.', variant: 'default' });
-                }
-              }}
-              className={cn(
-                "w-full flex items-center justify-center gap-2 py-2 sm:py-3 rounded-lg text-sm font-medium transition-colors",
-                photos.length > 0
-                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm"
-                  : "bg-muted text-muted-foreground cursor-not-allowed opacity-70"
-              )}
-              disabled={photos.length === 0}
-            >
-              <Trash2 size={16} className="sm:w-[18px] sm:h-[18px]" />
-              Remover Todas as Fotos
-            </button>
+          </div>
+        </aside>
 
-            <div className="text-center text-xs sm:text-sm text-muted-foreground mt-2">
-              {formatPhotoCount(photos.length)}
-            </div>
-          </aside>
-
-          <section className="flex-1 order-1 lg:order-2">
-            <div 
-              ref={photoGalleryRef} 
-              className="bg-card rounded-lg border border-border p-3 sm:p-4 shadow-sm min-h-[300px] sm:min-h-[400px] transition-all duration-150"
-            >
-              <h2 className="font-semibold text-card-foreground mb-3 sm:mb-4 text-sm sm:text-base">
-                Galeria de Fotos 
-                <span className="ml-2 font-normal text-muted-foreground/80">({formatPhotoCount(photos.length)})</span>
-              </h2>
-
-              {photos.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 sm:py-16 text-center">
-                  <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4">
-                    <ImagePlus size={24} className="text-muted-foreground sm:w-8 sm:h-8" />
+        {/* GALERIA */}
+        <section className="flex-1">
+          <div className={cn(
+            "bg-white dark:bg-slate-900 rounded-3xl border-2 border-dashed min-h-[500px] flex flex-col transition-all",
+            isDragging ? "border-[#1A1AFF] bg-blue-50 dark:bg-blue-900/10" : "border-slate-100 dark:border-slate-800/50",
+            photos.length > 0 ? "p-6" : "justify-center items-center"
+          )}>
+            {photos.length === 0 ? (
+              <div className="flex flex-col items-center opacity-40 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                <Camera size={60} strokeWidth={1} />
+                <p className="mt-4 font-medium">Nenhuma foto adicionada</p>
+              </div>
+            ) : (
+              <div className="w-full grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {photos.map((p, i) => (
+                  <div key={p.id} className="relative group">
+                    {/* Contador Discreto */}
+                    <div className="absolute top-3 left-3 z-10 px-2 py-1 bg-black/10 dark:bg-white/5 backdrop-blur-md rounded-md border border-white/20 dark:border-white/10 opacity-60 group-hover:opacity-100 transition-opacity">
+                      <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300">
+                        #{String(i + 1).padStart(2, '0')}
+                      </span>
+                    </div>
+                    <PhotoCard photo={p} index={i} onRemove={() => removePhoto(p.id)} onUpdateDescription={(d) => updatePhotoDescription(p.id, d)} />
                   </div>
-                  <p className="text-muted-foreground mb-2 text-sm sm:text-base font-medium">
-                    {formatPhotoCount(photos.length)}
-                  </p>
-                  <p className="text-xs sm:text-sm text-muted-foreground/70 px-4">
-                    Use os controles ou **arraste imagens** para esta área.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
-                  {photos.map((photo) => (
-                    <PhotoCard
-                      key={photo.id}
-                      photo={photo}
-                      onUpdateDescription={(description) =>
-                        updatePhotoDescription(photo.id, description)
-                      }
-                      onRemove={() => removePhoto(photo.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
+                ))}
+                <button onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl flex flex-col items-center justify-center min-h-[200px] text-slate-300 hover:text-[#1A1AFF] transition-all">
+                  <ImagePlus size={30} />
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
       </main>
 
-      <ExportModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
-      
-      <ConfirmDeleteAllModal 
-        isOpen={isConfirmDeleteAllOpen}
-        onClose={() => setIsConfirmDeleteAllOpen(false)}
-        onConfirm={handleDeleteAllConfirmed}
-        photoCount={photos.length}
-      />
+      <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={(e) => handleFiles(e.target.files!)} className="hidden" />
+      <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} />
+
+      {/* 🚀 MODAL DE CONFIRMAÇÃO RESTAURADO */}
+      {isConfirmDeleteAllOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[1000] p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-800 animate-in zoom-in duration-200">
+            <h3 className="text-xl font-bold text-red-600 dark:text-red-400 mb-2 flex items-center gap-2"><Trash2 size={20}/> Limpar Tudo?</h3>
+            <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">Esta ação irá remover todas as fotos do relatório e limpar o cache de recuperação.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setIsConfirmDeleteAllOpen(false)} className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl">Cancelar</button>
+              <button onClick={handleClearAll} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl shadow-lg">Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

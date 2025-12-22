@@ -53,6 +53,8 @@ export function ReportProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<ReportConfig>(initializeConfig);
   const [photos, setPhotos] = useState<Photo[]>([]);
 
+
+  
   useEffect(() => {
     localStorage.setItem(
       REPORT_CONFIG_STORAGE_KEY,

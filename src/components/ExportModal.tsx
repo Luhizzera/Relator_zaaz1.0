@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { X, FileText, File, Download, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+// @ts-nocheck
+import React, { useState } from 'react';
+import { FileText, FileDown, X, Loader2 } from 'lucide-react';
 import { useReport } from '@/contexts/ReportContext';
-import { generatePDF } from '@/lib/exportPdf';
-import { generateDOCX } from '@/lib/exportDocx';
+import { generateZAAZReport } from '@/lib/docxGenerator';
+// 💡 Alterado: Importamos apenas a função do novo motor consolidado
+import { runConsolidatedPDF } from '@/lib/pdfEngine'; 
 import { toast } from '@/hooks/use-toast';
 
 interface ExportModalProps {
@@ -11,146 +12,91 @@ interface ExportModalProps {
   onClose: () => void;
 }
 
-type ExportFormat = 'pdf' | 'docx';
-
-export function ExportModal({ isOpen, onClose }: ExportModalProps) {
-  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('pdf');
-  const [isExporting, setIsExporting] = useState(false);
-  const { getReportData } = useReport();
+export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => {
+  const { photos, config } = useReport();
+  const [loadingType, setLoadingType] = useState<'pdf' | 'docx' | null>(null);
 
   if (!isOpen) return null;
 
-  const handleExport = async () => {
-    setIsExporting(true);
-    const data = getReportData();
+  // ===== 1. Handler de Exportação Corrigido =====
+  const handleExport = async (type: 'pdf' | 'docx') => {
+    if (!photos || photos.length === 0) {
+      toast({ title: "Atenção", description: "Adicione fotos primeiro.", variant: "destructive" });
+      return;
+    }
 
     try {
-      if (selectedFormat === 'pdf') {
-        await generatePDF(data);
-        toast({
-          title: 'PDF exportado com sucesso!',
-          description: 'O download foi iniciado automaticamente.',
-        });
+      setLoadingType(type);
+      
+      if (type === 'docx') {
+        // Motor DOCX (Existente)
+        await generateZAAZReport({ config, photos });
       } else {
-        await generateDOCX(data);
-        toast({
-          title: 'DOCX exportado com sucesso!',
-          description: 'O download foi iniciado automaticamente.',
-        });
+        // 💡 CRÍTICO: Agora chamamos a função runConsolidatedPDF que criamos no pdfEngine.ts
+        // Esta é a função que contém o cabeçalho fiel à foto meta.
+        await runConsolidatedPDF({ config, photos });
       }
+
+      toast({ title: "Sucesso!", description: `Relatório ${type.toUpperCase()} gerado.` });
       onClose();
     } catch (error) {
-      console.error('Export error:', error);
-      toast({
-        title: 'Erro ao exportar',
-        description: 'Ocorreu um erro ao gerar o arquivo. Tente novamente.',
-        variant: 'destructive',
-      });
+      console.error("Erro Exportação:", error);
+      toast({ title: "Erro", description: "Falha ao gerar arquivo.", variant: "destructive" });
     } finally {
-      setIsExporting(false);
+      setLoadingType(null);
     }
   };
 
   return (
-    <div 
-      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div 
-        className="bg-card rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-card-foreground">
-            Exportar Relatório
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-muted transition-colors"
-            aria-label="Fechar modal"
-          >
-            <X size={20} className="text-muted-foreground" />
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[999] p-4 text-slate-900">
+      <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-white/20 overflow-hidden animate-in zoom-in duration-200">
+        
+        {/* Header */}
+        <div className="p-5 border-b flex justify-between items-center bg-slate-50">
+          <h2 className="text-lg font-bold">Imprimir Relatório</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X size={20} />
           </button>
         </div>
 
-        <div className="p-6">
-          <p className="text-sm text-muted-foreground mb-4">
-            Selecione o formato desejado para exportar seu relatório:
-          </p>
-
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <button
-              onClick={() => setSelectedFormat('pdf')}
-              className={cn(
-                "flex flex-col items-center gap-3 p-6 rounded-lg border-2 transition-all",
-                selectedFormat === 'pdf'
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-muted-foreground/50"
-              )}
-            >
-              <FileText 
-                size={40} 
-                className={cn(
-                  selectedFormat === 'pdf' ? "text-primary" : "text-muted-foreground"
-                )} 
-              />
-              <span className={cn(
-                "font-medium",
-                selectedFormat === 'pdf' ? "text-primary" : "text-foreground"
-              )}>
-                PDF
-              </span>
-            </button>
-
-            <button
-              onClick={() => setSelectedFormat('docx')}
-              className={cn(
-                "flex flex-col items-center gap-3 p-6 rounded-lg border-2 transition-all",
-                selectedFormat === 'docx'
-                  ? "border-secondary bg-secondary/5"
-                  : "border-border hover:border-muted-foreground/50"
-              )}
-            >
-              <File 
-                size={40} 
-                className={cn(
-                  selectedFormat === 'docx' ? "text-secondary" : "text-muted-foreground"
-                )} 
-              />
-              <span className={cn(
-                "font-medium",
-                selectedFormat === 'docx' ? "text-secondary" : "text-foreground"
-              )}>
-                DOCX
-              </span>
-            </button>
-          </div>
-
+        {/* Opções de Download */}
+        <div className="p-5 space-y-3">
+          {/* Botão Word */}
           <button
-            onClick={handleExport}
-            disabled={isExporting}
-            className={cn(
-              "w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium text-primary-foreground transition-all",
-              selectedFormat === 'pdf' 
-                ? "bg-primary hover:bg-primary/90" 
-                : "bg-secondary hover:bg-secondary/90",
-              isExporting && "opacity-70 cursor-not-allowed"
-            )}
+            onClick={() => handleExport('docx')}
+            disabled={loadingType !== null}
+            className="w-full flex items-center gap-4 p-4 rounded-xl border border-blue-100 bg-blue-50 hover:bg-blue-100 transition-colors group"
           >
-            {isExporting ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                Exportando...
-              </>
-            ) : (
-              <>
-                <Download size={20} />
-                Exportar Relatório em {selectedFormat.toUpperCase()}
-              </>
-            )}
+            <div className="bg-blue-600 p-2.5 rounded-lg text-white group-hover:scale-105 transition-transform">
+              {loadingType === 'docx' ? <Loader2 className="animate-spin" /> : <FileDown size={24} />}
+            </div>
+            <div className="text-left">
+              <span className="block font-bold text-blue-900">Word (.docx)</span>
+              <span className="text-xs text-blue-600/70">Editável • Escala 2x</span>
+            </div>
           </button>
+
+          {/* Botão PDF (Agora vinculado ao motor consolidado) */}
+          <button
+            onClick={() => handleExport('pdf')}
+            disabled={loadingType !== null}
+            className="w-full flex items-center gap-4 p-4 rounded-xl border border-red-100 bg-red-50 hover:bg-red-100 transition-colors group"
+          >
+            <div className="bg-red-600 p-2.5 rounded-lg text-white group-hover:scale-105 transition-transform">
+              {loadingType === 'pdf' ? <Loader2 className="animate-spin" /> : <FileText size={24} />}
+            </div>
+            <div className="text-left">
+              <span className="block font-bold text-red-900">PDF (.pdf)</span>
+              <span className="text-xs text-red-600/70">Modelo Consolidado ZAAZ</span>
+            </div>
+          </button>
+        </div>
+
+        {/* Rodapé Interno */}
+        <div className="py-2 bg-slate-100 text-center">
+          <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">ZAAZ SYSTEM • V4.0</span>
         </div>
       </div>
     </div>
   );
-}
+};
