@@ -1,176 +1,308 @@
 // @ts-nocheck
-import * as docx from 'docx';
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  Table,
+  TableRow,
+  TableCell,
+  ImageRun,
+  AlignmentType,
+  WidthType,
+  VerticalAlign,
+  BorderStyle,
+  HeightRule,
+} from 'docx';
 import { saveAs } from 'file-saver';
 
-async function getImgBuffer(url: string) {
+// ===== HELPERS =====
+
+const BORDER = { style: BorderStyle.SINGLE, size: 3, color: '000000' };
+const ALL_BORDERS = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
+const NO_BORDERS = {
+  top:    { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  left:   { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  right:  { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+};
+
+const YELLOW = 'EAB308';
+const YELLOW_SHADE = { fill: YELLOW };
+
+/**
+ * Busca uma imagem via URL e retorna Uint8Array.
+ * Retorna null se falhar (evita crash no Document).
+ */
+async function fetchImageBuffer(url: string): Promise<Uint8Array | null> {
   if (!url) return null;
   try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    const arrayBuffer = await response.arrayBuffer();
-    return new Uint8Array(arrayBuffer);
-  } catch (e) { return null; }
+    // Base64 data URL — converte direto sem fetch
+    if (url.startsWith('data:')) {
+      const base64 = url.split(',')[1];
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return new Uint8Array(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
 }
 
-export const generateZAAZReport = async (data: any) => {
-  try {
-    const { config, photos } = data;
-    const YELLOW = "EAB308";
-    const BORDER = { style: docx.BorderStyle.SINGLE, size: 3, color: "000000" };
+/** Cria um parágrafo vazio com espaçamento opcional. */
+function spacer(before = 0, after = 0): Paragraph {
+  return new Paragraph({ spacing: { before, after }, children: [] });
+}
 
-    const cleanRef = (config?.codigoReferencia || 'SEM_REF').replace(/[/\\?%*:|"<>]/g, '-');
-    const fileName = `RESP.NOT-${cleanRef}.docx`;
-    const logoBuf = await getImgBuffer('/images/logo-zaaz.jpeg');
+/** Célula simples de tabela com texto e bordas padrão. */
+function infoCell(
+  labelText: string,
+  valueText: string,
+  widthPct: number,
+  align: typeof AlignmentType[keyof typeof AlignmentType] = AlignmentType.LEFT,
+): TableCell {
+  return new TableCell({
+    width: { size: widthPct, type: WidthType.PERCENTAGE },
+    borders: ALL_BORDERS,
+    verticalAlign: VerticalAlign.CENTER,
+    margins: { top: 60, bottom: 60, left: 120, right: 120 },
+    children: [
+      new Paragraph({
+        alignment: align,
+        children: [
+          new TextRun({ text: `${labelText}: `, color: YELLOW, bold: true, size: 16 }),
+          new TextRun({ text: valueText || 'N/A', size: 16 }),
+        ],
+      }),
+    ],
+  });
+}
 
-    const sections = [];
-    const photosPerPage = 4;
+// ===== GERADOR PRINCIPAL =====
 
-    for (let i = 0; i < photos.length; i += photosPerPage) {
-      const pagePhotos = photos.slice(i, i + photosPerPage);
-      const pageNum = Math.floor(i / photosPerPage) + 1;
-      const totalPages = Math.ceil(photos.length / photosPerPage);
+export const generateZAAZReport = async (data: any): Promise<Blob | void> => {
+  const { config, photos } = data;
 
-      // --- CABEÇALHO (MANTIDO V12 STYLE CENTRALIZADO) ---
-      const titlePara = new docx.Paragraph({
-        alignment: docx.AlignmentType.CENTER,
-        children: [new docx.TextRun({ text: "RELATÓRIO FOTOGRÁFICO", bold: true, size: 28 })],
-        spacing: { after: 100 }
-      });
+  const cleanRef = (config?.codigoReferencia || 'SEM_REF').replace(/[/\\?%*:|"<>]/g, '-');
+  const fileName = `RESP.NOT-${cleanRef}.docx`;
+  const dateStr = new Date().toLocaleDateString('pt-BR');
 
-      const refTable = new docx.Table({
-        width: { size: 100, type: docx.WidthType.PERCENTAGE },
-        borders: docx.TableBorders.NONE,
-        rows: [new docx.TableRow({
+  const logoBuf = await fetchImageBuffer('/images/logo-zaaz.jpeg');
+
+  const photosPerPage = 4;
+  const totalPages = Math.ceil(photos.length / photosPerPage) || 1;
+  const docSections = [];
+
+  for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+    const pagePhotos = photos.slice(pageIdx * photosPerPage, (pageIdx + 1) * photosPerPage);
+    const pageNum = pageIdx + 1;
+
+    // ------------------------------------------------------------------
+    // 1. TÍTULO
+    // ------------------------------------------------------------------
+    const titlePara = new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 120 },
+      children: [
+        new TextRun({ text: 'RELATÓRIO FOTOGRÁFICO', bold: true, size: 28 }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
+    // 2. BADGE DE REFERÊNCIA (alinhado à direita, sem tabela invisível)
+    // ------------------------------------------------------------------
+    const refBadgePara = new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      spacing: { after: 100 },
+      children: [
+        new TextRun({
+          text: ` ${config?.codigoReferencia || 'NOT-XXXX'} `,
+          bold: true,
+          size: 18,
+          highlight: 'yellow',   // destaque amarelo nativo — sem shading de célula
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
+    // 3. TABELA DE INFORMAÇÕES (logo | dados | pág/data/local)
+    // ------------------------------------------------------------------
+
+    // Célula do logo (rowSpan=3)
+    const logoCell = new TableCell({
+      rowSpan: 3,
+      width: { size: 20, type: WidthType.PERCENTAGE },
+      borders: ALL_BORDERS,
+      verticalAlign: VerticalAlign.CENTER,
+      children: logoBuf
+        ? [new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new ImageRun({ type: 'jpg', data: logoBuf, transformation: { width: 80, height: 80 } })],
+          })]
+        : [new Paragraph({ children: [] })],
+    });
+
+    const infoTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({
+          height: { value: 500, rule: HeightRule.AT_LEAST },
           children: [
-            new docx.TableCell({ children: [], width: { size: 75, type: docx.WidthType.PERCENTAGE } }),
-            new docx.TableCell({
-              width: { size: 25, type: docx.WidthType.PERCENTAGE },
-              shading: { fill: YELLOW },
-              borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER },
-              verticalAlign: docx.VerticalAlign.CENTER,
-              children: [new docx.Paragraph({
-                alignment: docx.AlignmentType.CENTER,
-                children: [new docx.TextRun({ text: config?.codigoReferencia || "NOT-XXXX", bold: true, size: 18 })]
-              })]
-            })
-          ]
-        })]
-      });
+            logoCell,
+            infoCell('Razão Social', config?.razaoSocial, 55),
+            infoCell('Pág', `${pageNum} de ${totalPages}`, 25, AlignmentType.RIGHT),
+          ],
+        }),
+        new TableRow({
+          height: { value: 500, rule: HeightRule.AT_LEAST },
+          children: [
+            infoCell('Título', config?.tituloRelatorio, 55),
+            infoCell('Data', dateStr, 25, AlignmentType.RIGHT),
+          ],
+        }),
+        new TableRow({
+          height: { value: 500, rule: HeightRule.AT_LEAST },
+          children: [
+            infoCell('Objetivo', config?.objetivo, 55),
+            infoCell('Local', config?.local, 25, AlignmentType.RIGHT),
+          ],
+        }),
+      ],
+    });
 
-      const infoTable = new docx.Table({
-        width: { size: 100, type: docx.WidthType.PERCENTAGE },
-        rows: [
-          new docx.TableRow({
-            height: { value: 450, rule: docx.HeightRule.EXACT },
-            children: [
-              new docx.TableCell({
-                rowSpan: 3, width: { size: 22, type: docx.WidthType.PERCENTAGE },
-                borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER },
-                verticalAlign: docx.VerticalAlign.CENTER,
-                children: logoBuf ? [new docx.Paragraph({
-                  alignment: docx.AlignmentType.CENTER,
-                  children: [new docx.ImageRun({ data: logoBuf, transformation: { width: 75, height: 75 } })]
-                })] : []
+    // ------------------------------------------------------------------
+    // 4. GRID 2×2 DE FOTOS
+    // ------------------------------------------------------------------
+    const photoRows: TableRow[] = [];
+
+    for (let rowIdx = 0; rowIdx < Math.ceil(pagePhotos.length / 2); rowIdx++) {
+      const pair = pagePhotos.slice(rowIdx * 2, rowIdx * 2 + 2);
+
+      const cells = await Promise.all(
+        pair.map(async (photo, colIdx) => {
+          const globalPhotoNum = pageIdx * photosPerPage + rowIdx * 2 + colIdx + 1;
+          const imgBuf = await fetchImageBuffer(photo.src);
+          const cellChildren: Paragraph[] = [];
+
+          // Imagem
+          if (imgBuf) {
+            cellChildren.push(
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 60 },
+                children: [
+                  new ImageRun({ type: 'jpg', data: imgBuf, transformation: { width: 330, height: 240 } }),
+                ],
               }),
-              new docx.TableCell({
-                width: { size: 53, type: docx.WidthType.PERCENTAGE },
-                borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER },
-                verticalAlign: docx.VerticalAlign.CENTER,
-                children: [new docx.Paragraph({ children: [
-                  new docx.TextRun({ text: "Razão Social: ", color: YELLOW, bold: true, size: 16 }),
-                  new docx.TextRun({ text: config?.razaoSocial || "N/A", size: 16 })
-                ]})]
-              }),
-              new docx.TableCell({
-                width: { size: 25, type: docx.WidthType.PERCENTAGE },
-                borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER },
-                verticalAlign: docx.VerticalAlign.CENTER,
-                children: [new docx.Paragraph({ alignment: docx.AlignmentType.RIGHT, children: [
-                  new docx.TextRun({ text: "Pág: ", color: YELLOW, bold: true, size: 16 }),
-                  new docx.TextRun({ text: `${pageNum} de ${totalPages}`, size: 16 })
-                ]})]
-              })
-            ]
-          }),
-          new docx.TableRow({
-            height: { value: 450, rule: docx.HeightRule.EXACT },
-            children: [
-              new docx.TableCell({ verticalAlign: docx.VerticalAlign.CENTER, borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER }, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: "Título: ", color: YELLOW, bold: true, size: 16 }), new docx.TextRun({ text: config?.tituloRelatorio || "N/A", size: 16 })]})] }),
-              new docx.TableCell({ verticalAlign: docx.VerticalAlign.CENTER, borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER }, children: [new docx.Paragraph({ alignment: docx.AlignmentType.RIGHT, children: [new docx.TextRun({ text: "Data: ", color: YELLOW, bold: true, size: 16 }), new docx.TextRun({ text: new Date().toLocaleDateString('pt-BR'), size: 16 })]})] })
-            ]
-          }),
-          new docx.TableRow({
-            height: { value: 450, rule: docx.HeightRule.EXACT },
-            children: [
-              new docx.TableCell({ verticalAlign: docx.VerticalAlign.CENTER, borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER }, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: "Objetivo: ", color: YELLOW, bold: true, size: 16 }), new docx.TextRun({ text: config?.objetivo || "N/A", size: 16 })]})] }),
-              new docx.TableCell({ verticalAlign: docx.VerticalAlign.CENTER, borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER }, children: [new docx.Paragraph({ alignment: docx.AlignmentType.RIGHT, children: [new docx.TextRun({ text: "Local: ", color: YELLOW, bold: true, size: 16 }), new docx.TextRun({ text: config?.local || "N/A", size: 14 })]})] })
-            ]
-          })
-        ]
-      });
-
-      // --- 4. GRID 2x2 (11,5 CM COM FOTO LEVEMENTE MAIOR) ---
-      const photoRows = [];
-      for (let j = 0; j < pagePhotos.length; j += 2) {
-        const pair = pagePhotos.slice(j, j + 2);
-        const cells = await Promise.all(pair.map(async (p, idx) => {
-          const pBuf = await getImgBuffer(p.src);
-          const cellChildren = [];
-
-          if (pBuf) {
-            cellChildren.push(new docx.Paragraph({
-              alignment: docx.AlignmentType.CENTER,
-              children: [new docx.ImageRun({ 
-                data: pBuf, 
-                // 💡 Aumentado de 280 para 315 para ocupar o "espaço laranja"
-                transformation: { width: 340, height: 315 } 
-              })]
-            }));
+            );
           }
 
-          cellChildren.push(new docx.Paragraph({
-            spacing: { before: 180, after: 50 },
-            children: [new docx.TextRun({ text: `Foto ${i + j + idx + 1}:`, bold: true, size: 18 })]
-          }));
+          // UTM
+          if (photo.location) {
+            cellChildren.push(
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 40, after: 40 },
+                children: [
+                  new TextRun({ text: `UTM: ${photo.location}`, bold: true, size: 14, font: 'Courier New' }),
+                ],
+              }),
+            );
+          }
 
-          if (p.description) {
-            p.description.split('||').forEach(line => {
-              cellChildren.push(new docx.Paragraph({
-                spacing: { before: 0, after: 0 },
-                children: [new docx.TextRun({ text: `• ${line.trim()}`, size: 16 })]
-              }));
+          // Número da foto
+          cellChildren.push(
+            new Paragraph({
+              spacing: { before: 80, after: 40 },
+              children: [new TextRun({ text: `Foto ${globalPhotoNum}:`, bold: true, size: 18 })],
+            }),
+          );
+
+          // Checklist (itens separados por ||)
+          if (photo.description) {
+            photo.description.split('||').filter(Boolean).forEach((line: string) => {
+              cellChildren.push(
+                new Paragraph({
+                  spacing: { before: 0, after: 30 },
+                  children: [new TextRun({ text: `• ${line.trim()}`, size: 16 })],
+                }),
+              );
             });
           }
 
-          return new docx.TableCell({
-            width: { size: 50, type: docx.WidthType.PERCENTAGE },
-            borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER },
+          // Observações
+          if (photo.observacoes) {
+            cellChildren.push(
+              new Paragraph({
+                spacing: { before: 60 },
+                children: [
+                  new TextRun({ text: 'Obs: ', size: 14, bold: true, color: '555555' }),
+                  new TextRun({ text: photo.observacoes, size: 14, italic: true, color: '555555' }),
+                ],
+              }),
+            );
+          }
+
+          return new TableCell({
+            width: { size: 50, type: WidthType.PERCENTAGE },
+            borders: ALL_BORDERS,
             margins: { top: 80, bottom: 100, left: 150, right: 150 },
-            verticalAlign: docx.VerticalAlign.TOP,
-            children: cellChildren
+            verticalAlign: VerticalAlign.TOP,
+            children: cellChildren,
           });
-        }));
+        }),
+      );
 
-        if (cells.length === 1) cells.push(new docx.TableCell({ children: [], borders: BORDER }));
-
-        photoRows.push(new docx.TableRow({ 
-          height: { value: 6520, rule: docx.HeightRule.EXACT }, 
-          children: cells 
-        }));
+      // Célula vazia para completar par ímpar
+      if (cells.length === 1) {
+        cells.push(
+          new TableCell({
+            width: { size: 50, type: WidthType.PERCENTAGE },
+            borders: ALL_BORDERS,
+            children: [new Paragraph({ children: [] })],
+          }),
+        );
       }
 
-      sections.push({
-        properties: { page: { margin: { top: 300, right: 300, bottom: 300, left: 300 } } },
-        children: [titlePara, refTable, new docx.Paragraph({ spacing: { before: 50 } }), infoTable, new docx.Paragraph({ spacing: { before: 200 } }), new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, rows: photoRows })]
-      });
+      photoRows.push(
+        new TableRow({
+          height: { value: 5500, rule: HeightRule.AT_LEAST },
+          children: cells,
+        }),
+      );
     }
 
-    const doc = new docx.Document({ sections });
-    const blob = await docx.Packer.toBlob(doc);
-    saveAs(blob, fileName);
+    const photoGrid = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: photoRows,
+    });
 
-  } catch (err) {
-    console.error("ERRO:", err);
-    alert("Erro ao gerar. Verifique os dados.");
+    docSections.push({
+      properties: {
+        page: { margin: { top: 400, right: 400, bottom: 400, left: 400 } },
+      },
+      children: [
+        titlePara,
+        refBadgePara,
+        infoTable,
+        spacer(200, 0),
+        photoGrid,
+      ],
+    });
   }
+
+  // ------------------------------------------------------------------
+  // 5. GERAR E BAIXAR
+  // ------------------------------------------------------------------
+  const doc = new Document({ sections: docSections });
+  const blob = await Packer.toBlob(doc);
+
+  if (data.returnBlob) {
+    return blob;
+  }
+  saveAs(blob, fileName);
 };

@@ -19,6 +19,19 @@
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="O RELATOR DE PROJETOS" />
     <meta name="twitter:image" content="/images/Eng-zaaz.png" />
+
+    <script>
+      // Aplica o tema salvo ANTES do React montar, pra não piscar claro/escuro
+      // na primeira renderização. Mesma lógica do ThemeContext.tsx.
+      (function () {
+        try {
+          var saved = localStorage.getItem('theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var isDark = saved === 'dark' || (!saved && prefersDark);
+          if (isDark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
   </head>
 
   <body>

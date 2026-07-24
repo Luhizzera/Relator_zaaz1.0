@@ -1,43 +1,50 @@
 import { Moon, Sun } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useEffect, useState } from "react";
+import { useTheme } from "@/contexts/ThemeContext";
+import { cn } from "@/lib/utils";
+import { iconChipButtonClass } from "./BackButton";
 
-export function ThemeToggle() {
-  const [isDark, setIsDark] = useState(false);
+interface ThemeToggleProps {
+  className?: string;
+  /**
+   * chip       → botão "quadrado" com borda, usado em headers estilo cartão
+   *              (Dashboard, PageHeader, telas de listagem...).
+   * ghost-dark → ícone sem fundo próprio, para headers com cor sólida ou
+   *              escura (Config, Photos, Login), onde um "chip" branco
+   *              destoaria do resto do header.
+   */
+  variant?: "chip" | "ghost-dark";
+}
 
-  useEffect(() => {
-    const isDarkMode = document.documentElement.classList.contains("dark");
-    setIsDark(isDarkMode);
-  }, []);
+export function ThemeToggle({ className, variant = "chip" }: ThemeToggleProps) {
+  const { isDark, toggleTheme } = useTheme();
+  const label = isDark ? "Mudar para modo claro" : "Mudar para modo escuro";
 
-  const toggleTheme = () => {
-    const newIsDark = !isDark;
-    setIsDark(newIsDark);
-    document.documentElement.classList.toggle("dark", newIsDark);
-    localStorage.setItem("theme", newIsDark ? "dark" : "light");
-  };
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    if (savedTheme === "dark") {
-      document.documentElement.classList.add("dark");
-      setIsDark(true);
-    }
-  }, []);
+  if (variant === "ghost-dark") {
+    return (
+      <button
+        onClick={toggleTheme}
+        aria-label={label}
+        title={label}
+        className={cn(
+          "flex items-center justify-center w-8 h-8 rounded-lg",
+          "text-white/70 hover:text-white hover:bg-white/10",
+          "transition-colors duration-150 shrink-0",
+          className,
+        )}
+      >
+        {isDark ? <Sun size={16} /> : <Moon size={16} />}
+      </button>
+    );
+  }
 
   return (
-    <Button
-      variant="outline"
-      size="icon"
+    <button
       onClick={toggleTheme}
-      className="fixed top-4 right-4 z-50"
+      aria-label={label}
+      title={label}
+      className={cn(iconChipButtonClass, className)}
     >
-      {isDark ? (
-        <Sun className="h-5 w-5" />
-      ) : (
-        <Moon className="h-5 w-5" />
-      )}
-      <span className="sr-only">Alternar tema</span>
-    </Button>
+      {isDark ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
   );
 }

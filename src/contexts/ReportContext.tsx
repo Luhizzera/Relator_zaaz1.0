@@ -9,6 +9,15 @@ import { ReportConfig, Photo, ReportData } from '@/types/report';
 
 const REPORT_CONFIG_STORAGE_KEY = 'reportConfig';
 
+// Checklist padrão (Rede Óptica) — usado quando nenhum preset está ativo
+export const DEFAULT_CHECKLIST: string[] = [
+  'Instalado no cabo de fibra a Placa de Identificação',
+  'Não temos ativo de rede de cabo de fibra óptica Zaaz nesse local',
+  'Instalado no cabo de fibra a Placa de Identificação e executado adequações',
+  'Este poste é de propriedade particular',
+  'Os cabos e equipamentos soltos existentes, são de terceiros',
+];
+
 const defaultConfig: ReportConfig = {
   documentName: '',
   razaoSocial: 'ZAAZ PROVEDOR DE INTERNET E TELECOMUNICAÇÕES',
@@ -18,15 +27,23 @@ const defaultConfig: ReportConfig = {
   local: '',
   header: '',
   footer: '',
+  presetId: 'rede-optica',
+  checklistOptions: DEFAULT_CHECKLIST,
 };
 
 const initializeConfig = (): ReportConfig => {
   try {
     const saved = localStorage.getItem(REPORT_CONFIG_STORAGE_KEY);
     if (saved) {
-      const loadedConfig = JSON.parse(saved);
-      // Garante que o objeto retornado tenha todos os campos padrão, caso o localStorage seja antigo
-      return { ...defaultConfig, ...loadedConfig }; 
+      const loaded = JSON.parse(saved);
+      return {
+        ...defaultConfig,
+        ...loaded,
+        // garante que sempre há um checklist válido
+        checklistOptions: loaded.checklistOptions?.length
+          ? loaded.checklistOptions
+          : DEFAULT_CHECKLIST,
+      };
     }
   } catch (e) {
     console.error('Erro ao carregar config:', e);
@@ -40,9 +57,10 @@ interface ReportContextType {
   photos: Photo[];
   addPhoto: (photo: Photo) => void;
   updatePhotoDescription: (id: string, description: string) => void;
-  updatePhotoObservacoes: (id: string, observacoes: string) => void; 
+  updatePhotoObservacoes: (id: string, observacoes: string) => void;
   removePhoto: (id: string) => void;
   clearAllPhotos: () => void;
+  reorderPhotos: (reordered: Photo[]) => void;
   getReportData: () => ReportData;
   resetReport: () => void;
 }
@@ -53,50 +71,39 @@ export function ReportProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<ReportConfig>(initializeConfig);
   const [photos, setPhotos] = useState<Photo[]>([]);
 
-
-  
   useEffect(() => {
-    localStorage.setItem(
-      REPORT_CONFIG_STORAGE_KEY,
-      JSON.stringify(config)
-    );
+    localStorage.setItem(REPORT_CONFIG_STORAGE_KEY, JSON.stringify(config));
   }, [config]);
 
   const addPhoto = (newPhoto: Photo) => {
     setPhotos((prev) => [
-      ...prev, 
-      { 
+      ...prev,
+      {
         ...newPhoto,
-        description: newPhoto.description || '',
-        observacoes: newPhoto.observacoes || '', // Inicialização
-      }
+        description:  newPhoto.description  || '',
+        observacoes:  newPhoto.observacoes   || '',
+        geoAttempted: newPhoto.geoAttempted  ?? false,
+      },
     ]);
   };
 
   const updatePhotoDescription = (id: string, description: string) => {
-    setPhotos((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, description } : p))
-    );
+    setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, description } : p)));
   };
-  
+
   const updatePhotoObservacoes = (id: string, observacoes: string) => {
-    setPhotos((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, observacoes } : p))
-    );
+    setPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, observacoes } : p)));
   };
 
   const removePhoto = (id: string) => {
     setPhotos((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const clearAllPhotos = () => {
-    setPhotos([]);
-  };
+  const clearAllPhotos = () => setPhotos([]);
 
-  const getReportData = (): ReportData => ({
-    config,
-    photos,
-  });
+  const reorderPhotos = (reordered: Photo[]) => setPhotos(reordered);
+
+  const getReportData = (): ReportData => ({ config, photos });
 
   const resetReport = () => {
     setConfig(defaultConfig);
@@ -114,6 +121,7 @@ export function ReportProvider({ children }: { children: ReactNode }) {
         updatePhotoObservacoes,
         removePhoto,
         clearAllPhotos,
+        reorderPhotos,
         getReportData,
         resetReport,
       }}
@@ -125,8 +133,6 @@ export function ReportProvider({ children }: { children: ReactNode }) {
 
 export function useReport() {
   const context = useContext(ReportContext);
-  if (!context) {
-    throw new Error('useReport must be used within ReportProvider');
-  }
+  if (!context) throw new Error('useReport must be used within ReportProvider');
   return context;
 }
