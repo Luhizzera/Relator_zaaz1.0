@@ -53,7 +53,7 @@ export function PageHeader({
                 title="Menu"
                 className={iconChipButtonClass}
               >
-                <Menu size={18} />
+                <Menu className="icon-md" />
               </button>
             )
             : <BackButton to={backTo} />

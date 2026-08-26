@@ -17,7 +17,7 @@ function GoogleIcon({ size = 18 }: { size?: number }) {
 }
 
 export default function Login() {
-  const { signIn, signUp, signInWithGoogle } = useAuth();
+  const { signIn, signUp, signInWithGoogle, resetPassword } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
@@ -26,6 +26,13 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [signupDone, setSignupDone] = useState(false);
+  // Fluxo de "esqueci minha senha" — inline, reaproveitando o card do login
+  // em vez de uma tela separada. `forgotSent` mostra a confirmação sem
+  // revelar se o e-mail existe de fato na base (mesma mensagem sempre).
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   // O login com Google redireciona pra fora e volta — se o gatilho do banco
   // rejeitar a conta (domínio errado), o Supabase manda o erro de volta na
@@ -77,6 +84,26 @@ export default function Login() {
     // Sem erro: a página vai navegar pro Google, não precisa desligar o loading.
   };
 
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setForgotLoading(true);
+    try {
+      const { error } = await resetPassword(forgotEmail);
+      if (error) setError(error);
+      else setForgotSent(true);
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const abrirEsqueciSenha = () => {
+    setError(null);
+    setForgotEmail(email);
+    setForgotSent(false);
+    setForgotMode(true);
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-950 p-4">
       <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -85,12 +112,65 @@ export default function Login() {
             <ThemeToggle variant="ghost-dark" />
           </div>
           <img src="/images/logo-zaaz.jpeg" alt="ZAAZ" className="w-14 h-14 mx-auto rounded-lg mb-3 object-cover" />
-          <h1 className="text-white font-black text-lg tracking-tight">ZAAZ SYSTEM</h1>
+          <h1 className="text-white font-black text-lg tracking-tight">SURVEYOS</h1>
           <p className="text-white/50 text-xs font-medium mt-0.5">Relatórios & Manutenção</p>
         </div>
 
-        <form onSubmit={handleSubmit} autoComplete="off" className="p-6 space-y-4">
-          {signupDone ? (
+        <form onSubmit={forgotMode ? handleForgotSubmit : handleSubmit} autoComplete="off" className="p-6 space-y-4">
+          {forgotMode ? (
+            forgotSent ? (
+              <div className="text-center space-y-3 py-4">
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  Se <strong>{forgotEmail}</strong> tiver uma conta cadastrada, você vai receber um e-mail com um link para criar uma nova senha.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setForgotMode(false); setForgotSent(false); }}
+                  className="text-sm font-bold text-blue-600 hover:underline"
+                >
+                  Voltar para o login
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  Informe seu e-mail e enviaremos um link para redefinir sua senha.
+                </p>
+                <div className="relative">
+                  <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    required
+                    autoFocus
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    placeholder="E-mail"
+                    className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                {error && (
+                  <p className="text-xs font-semibold text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
+                    {error}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  disabled={forgotLoading}
+                  className="w-full py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
+                >
+                  {forgotLoading && <Loader2 size={16} className="animate-spin" />}
+                  Enviar link de redefinição
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForgotMode(false)}
+                  className="w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                >
+                  Voltar para o login
+                </button>
+              </>
+            )
+          ) : signupDone ? (
             <div className="text-center space-y-3 py-4">
               <p className="text-sm text-slate-600 dark:text-slate-300">
                 Conta criada! Verifique seu e-mail para confirmar o cadastro e depois faça login.
@@ -142,6 +222,16 @@ export default function Login() {
                   className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+
+              {mode === 'login' && (
+                <button
+                  type="button"
+                  onClick={abrirEsqueciSenha}
+                  className="block ml-auto text-xs font-semibold text-blue-600 hover:underline -mt-2"
+                >
+                  Esqueci minha senha
+                </button>
+              )}
 
               {error && (
                 <p className="text-xs font-semibold text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">

@@ -28,6 +28,10 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ error: string | null }>;
   /** Preenche o nome de quem entrou via Google sem `full_name`/`name` no metadata (ver migração 0012) e marca o perfil como completo. */
   completeProfile: (nome: string) => Promise<{ error: string | null }>;
+  /** Dispara o e-mail de recuperação de senha — quem esqueceu não tinha nenhuma saída própria no app até então. */
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
+  /** Define a nova senha a partir da sessão de recuperação criada pelo link do e-mail (ver src/pages/ResetPassword.tsx). */
+  updatePassword: (password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -122,6 +126,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/redefinir-senha`,
+    });
+    return { error: error?.message ?? null };
+  };
+
+  const updatePassword = async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    return { error: error?.message ?? null };
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
@@ -145,6 +161,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signUp,
         signInWithGoogle,
         completeProfile,
+        resetPassword,
+        updatePassword,
         signOut,
       }}
     >

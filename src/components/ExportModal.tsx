@@ -181,7 +181,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
         </div>
 
         <div className="py-2 bg-slate-100 dark:bg-slate-800/60 text-center">
-          <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-tighter">ZAAZ SYSTEM • V5.0</span>
+          <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-tighter">SURVEYOS • V5.0</span>
         </div>
       </div>
     </div>

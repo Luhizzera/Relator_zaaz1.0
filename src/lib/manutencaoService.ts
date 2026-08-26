@@ -16,8 +16,11 @@ import type {
   VideoManutencaoRow,
   EquipeRow,
   ProfileRow,
+  TipoEquipe,
+  UserRole,
 } from '@/lib/supabaseClient';
 import { ManutencaoOrdem, StatusOS, ChecklistItemOS, SOLUCAO_PROBLEMA_CTO } from '@/types/manutencao';
+import { normalizarNomeCidade } from '@/lib/geocoding';
 
 type ProfileRowLite = Pick<ProfileRow, 'id' | 'nome' | 'email' | 'ativo' | 'equipe_id'>;
 
@@ -165,6 +168,7 @@ function rowToOrdem(
     motivoRecusa: row.motivo_recusa,
     canceladoEm: row.cancelado_em,
     motivoCancelamento: row.motivo_cancelamento,
+    referenciaExterna: row.referencia_externa,
 
     ocorrencias: ocorrencias.map(rowToOcorrencia),
     materiais: materiais.map(rowToMaterial),
@@ -322,22 +326,24 @@ export async function getManutencaoOrder(id: string): Promise<ManutencaoOrdem | 
   return ordem;
 }
 
-export async function listEquipes(): Promise<EquipeRow[]> {
+export async function listEquipes(tipo: TipoEquipe): Promise<EquipeRow[]> {
   const { data, error } = await supabase
     .from('equipes')
     .select('*')
+    .eq('tipo', tipo)
     .eq('ativa', true)
     .order('nome', { ascending: true });
   if (error) throw error;
   return (data ?? []) as EquipeRow[];
 }
 
-/** Equipes administradas por um supervisor específico — usado pra escopar quem ele pode delegar (ver DelegarTecnicoModal.tsx). */
-export async function listEquipesDoSupervisor(supervisorId: string): Promise<EquipeRow[]> {
+/** Equipes administradas por um supervisor específico — usado pra escopar quem ele pode delegar (ver DelegarTecnicoModal.tsx) e na tela de equipes (ver MinhaEquipe.tsx). */
+export async function listEquipesDoSupervisor(supervisorId: string, tipo: TipoEquipe): Promise<EquipeRow[]> {
   const { data, error } = await supabase
     .from('equipes')
     .select('*')
     .eq('supervisor_id', supervisorId)
+    .eq('tipo', tipo)
     .eq('ativa', true)
     .order('nome', { ascending: true });
   if (error) throw error;
@@ -345,10 +351,10 @@ export async function listEquipesDoSupervisor(supervisorId: string): Promise<Equ
 }
 
 /** Cria uma equipe nova. `supervisorId` omitido = equipe sem dono ainda (gestor atribui depois). */
-export async function criarEquipe(nome: string, supervisorId?: string): Promise<EquipeRow> {
+export async function criarEquipe(nome: string, tipo: TipoEquipe, supervisorId?: string): Promise<EquipeRow> {
   const { data, error } = await supabase
     .from('equipes')
-    .insert({ nome, supervisor_id: supervisorId ?? null })
+    .insert({ nome, tipo, supervisor_id: supervisorId ?? null })
     .select('*')
     .single();
   if (error) throw error;
@@ -361,25 +367,25 @@ export async function definirSupervisorDaEquipe(equipeId: string, supervisorId: 
   if (error) throw error;
 }
 
-/** Lista os técnicos de manutenção de uma equipe (perfis com esse `equipe_id`). */
-export async function listTecnicosDaEquipe(equipeId: string): Promise<ProfileRowLite[]> {
+/** Lista os técnicos (LA ou de manutenção, conforme `role`) de uma equipe (perfis com esse `equipe_id`). */
+export async function listTecnicosDaEquipe(equipeId: string, role: UserRole): Promise<ProfileRowLite[]> {
   const { data, error } = await supabase
     .from('profiles')
     .select('id, nome, email, ativo, equipe_id')
     .eq('equipe_id', equipeId)
-    .eq('role', 'tecnico_manutencao')
+    .eq('role', role)
     .order('nome', { ascending: true });
   if (error) throw error;
   return (data ?? []) as ProfileRowLite[];
 }
 
-/** Técnicos de manutenção sem equipe nenhuma — candidatos a adicionar (ver MinhaEquipe.tsx). */
-export async function listTecnicosSemEquipe(): Promise<ProfileRowLite[]> {
+/** Técnicos (LA ou de manutenção) sem equipe nenhuma — candidatos a adicionar (ver MinhaEquipe.tsx). */
+export async function listTecnicosSemEquipe(role: UserRole): Promise<ProfileRowLite[]> {
   const { data, error } = await supabase
     .from('profiles')
     .select('id, nome, email, ativo, equipe_id')
     .is('equipe_id', null)
-    .eq('role', 'tecnico_manutencao')
+    .eq('role', role)
     .eq('ativo', true)
     .order('nome', { ascending: true });
   if (error) throw error;
@@ -414,7 +420,10 @@ export async function createManutencaoOrder(
     responsavel_id: userId,
     responsavel_nome: partial.responsavel ?? null,
     uf: partial.uf ?? null,
-    municipio: partial.municipio ?? null,
+    // Normalizado aqui — ponto único de entrada da OS no banco — pra cidade
+    // digitada à mão ou vinda de geocodificação em momentos diferentes não
+    // virar valores distintos no filtro (ver normalizarNomeCidade).
+    municipio: partial.municipio ? normalizarNomeCidade(partial.municipio) : null,
     bairro: partial.bairro ?? null,
     endereco: partial.endereco ?? null,
     numero_endereco: partial.numeroEndereco ?? null,
@@ -532,6 +541,8 @@ export async function assignTecnico(
   ordemId: string,
   tecnicoId: string,
   tecnicoNome: string,
+  /** Referência da atividade equivalente no app "Aniel" — opcional, também editável depois (ver atualizarReferenciaExterna). */
+  referenciaExterna?: string,
 ): Promise<void> {
   const { data: tecnico } = await supabase
     .from('profiles')
@@ -539,16 +550,28 @@ export async function assignTecnico(
     .eq('id', tecnicoId)
     .maybeSingle();
 
+  const updatePayload: Record<string, unknown> = {
+    tecnico_id: tecnicoId,
+    equipe_id: tecnico?.equipe_id ?? null,
+    status: 'atribuida' as StatusOS,
+  };
+  if (referenciaExterna) updatePayload.referencia_externa = referenciaExterna;
+
   const { error } = await supabase
     .from('ordens_manutencao')
-    .update({
-      tecnico_id: tecnicoId,
-      equipe_id: tecnico?.equipe_id ?? null,
-      status: 'atribuida' as StatusOS,
-    })
+    .update(updatePayload)
     .eq('id', ordemId);
   if (error) throw error;
   await registrarHistorico(ordemId, `OS delegada para ${tecnicoNome}`);
+}
+
+/** Referência da atividade equivalente no app "Aniel" (ponte manual até existir integração via API) — editável a qualquer momento na aba Encerramento. */
+export async function atualizarReferenciaExterna(ordemId: string, valor: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('ordens_manutencao')
+    .update({ referencia_externa: valor })
+    .eq('id', ordemId);
+  if (error) throw error;
 }
 
 // ── Registros feitos durante a execução (mobile) ──────────────────────────
@@ -580,6 +603,11 @@ export async function addOcorrencias(
   );
 
   return { novosItensChecklist };
+}
+
+/** Nota livre registrada durante a execução (aba Ocorrências no mobile) — vira uma entrada no histórico/timeline da OS, sem exigir nenhum problema do checklist selecionado. */
+export async function adicionarObservacao(ordemId: string, texto: string): Promise<void> {
+  await registrarHistorico(ordemId, 'Observação registrada', texto);
 }
 
 export async function addMaterial(
@@ -630,7 +658,7 @@ export async function addMateriais(
 export async function addFotoManutencao(
   ordemId: string,
   dataUrl: string,
-  categoria: 'antes' | 'durante' | 'depois' = 'durante',
+  categoria: 'antes' | 'depois' = 'depois',
 ): Promise<void> {
   const fotoId = crypto.randomUUID();
   const storagePath = await uploadFotoManutencao(dataUrl, ordemId, fotoId);
@@ -676,34 +704,14 @@ export async function removeVideoManutencao(videoId: string, storagePath: string
   await registrarHistorico(ordemId, 'Vídeo removido');
 }
 
-// ── Aprovação (gestor) ─────────────────────────────────────────────────────
-
-export async function aprovarOrdem(ordemId: string): Promise<void> {
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData.user?.id ?? null;
-  const { error } = await supabase
-    .from('ordens_manutencao')
-    .update({ status: 'aprovada' as StatusOS, aprovado_por: userId, aprovado_em: new Date().toISOString() })
-    .eq('id', ordemId);
-  if (error) throw error;
-  await registrarHistorico(ordemId, 'OS aprovada pelo gestor');
-}
+// ── Encerramento (gestor/supervisor) ────────────────────────────────────────
 
 /**
- * "Retrabalho" na UI (AbaAprovacao) — devolve uma OS finalizada pro técnico
- * com uma observação adicional opcional. Não apaga nada do que já foi
- * registrado (ocorrências, materiais, checklist, fotos continuam intactos);
- * só muda o status e some no histórico.
+ * Reabre uma OS finalizada pro técnico com uma observação adicional opcional
+ * — usado quando o gestor/supervisor percebe que algo precisa de retrabalho.
+ * Não apaga nada do que já foi registrado (ocorrências, materiais, checklist,
+ * fotos continuam intactos); só muda o status e vira uma entrada no histórico.
  */
-export async function solicitarCorrecao(ordemId: string, motivo?: string): Promise<void> {
-  const { error } = await supabase
-    .from('ordens_manutencao')
-    .update({ status: 'reaberta' as StatusOS, motivo_recusa: motivo ?? null })
-    .eq('id', ordemId);
-  if (error) throw error;
-  await registrarHistorico(ordemId, 'Enviada para retrabalho', motivo);
-}
-
 export async function reabrirOrdem(ordemId: string, motivo?: string): Promise<void> {
   const { error } = await supabase
     .from('ordens_manutencao')
@@ -720,4 +728,21 @@ export async function cancelarOrdem(ordemId: string, motivo: string): Promise<vo
     .eq('id', ordemId);
   if (error) throw error;
   await registrarHistorico(ordemId, 'OS cancelada', motivo);
+}
+
+/**
+ * Encerramento definitivo — ação opcional do gestor/supervisor sobre uma OS
+ * já 'finalizada' pelo técnico. Não é um gate obrigatório (a OS já está
+ * operacionalmente concluída desde que o técnico finalizou); é só o "carimbo"
+ * de que o gestor revisou e não há mais nada pendente. Reaproveita o status
+ * 'aprovada', que já existe na constraint e no trigger de permissão desde a
+ * migração 0013 — só nunca tinha um botão que o setasse.
+ */
+export async function encerrarOrdem(ordemId: string): Promise<void> {
+  const { error } = await supabase
+    .from('ordens_manutencao')
+    .update({ status: 'aprovada' as StatusOS, aprovado_em: new Date().toISOString() })
+    .eq('id', ordemId);
+  if (error) throw error;
+  await registrarHistorico(ordemId, 'OS encerrada definitivamente');
 }

@@ -209,7 +209,9 @@ export default function OrdersList() {
                 <select
                   value={o.status}
                   onChange={(e) => setOrderStatus(o.id, e.target.value as OrdemStatus)}
-                  className="text-[11px] font-bold border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-900"
+                  disabled={o.status === 'exportada'}
+                  title={o.status === 'exportada' ? 'Relatório exportado é travado — abra a ordem e use "Editar" para criar uma cópia editável.' : undefined}
+                  className="text-[11px] font-bold border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {Object.entries(STATUS_LABEL).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>

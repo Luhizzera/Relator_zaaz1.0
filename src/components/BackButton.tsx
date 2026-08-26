@@ -49,7 +49,7 @@ export function BackButton({ to, onClick, label = 'Voltar', variant = 'default',
           className,
         )}
       >
-        <ArrowLeft size={16} />
+        <ArrowLeft className="icon-md" />
         <span className="hidden xs:inline">{label}</span>
       </button>
     );
@@ -65,7 +65,7 @@ export function BackButton({ to, onClick, label = 'Voltar', variant = 'default',
           className,
         )}
       >
-        <ArrowLeft size={16} /> {label}
+        <ArrowLeft className="icon-md" /> {label}
       </button>
     );
   }
@@ -77,7 +77,7 @@ export function BackButton({ to, onClick, label = 'Voltar', variant = 'default',
       title={label}
       className={cn(iconChipButtonClass, className)}
     >
-      <ArrowLeft size={18} />
+      <ArrowLeft className="icon-md" />
     </button>
   );
 }

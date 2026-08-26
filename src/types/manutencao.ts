@@ -23,7 +23,7 @@ export type StatusOS =
   | 'no_local'
   | 'em_execucao'
   | 'pausada'
-  | 'aguardando_aprovacao'
+  | 'finalizada'
   | 'aprovada'
   | 'reaberta'
   | 'cancelada'
@@ -64,7 +64,7 @@ export interface HistoricoEventoOS {
   descricao?: string;
 }
 
-export type CategoriaFotoOS = 'antes' | 'durante' | 'depois';
+export type CategoriaFotoOS = 'antes' | 'depois';
 
 export interface FotoOS {
   id: string;
@@ -129,6 +129,9 @@ export interface ManutencaoOrdem {
   canceladoEm?: string | null;
   motivoCancelamento?: string | null;
 
+  /** Ponte manual pro app "Aniel" até existir integração via API — editável na aba Encerramento, opcionalmente já preenchida na delegação. */
+  referenciaExterna?: string | null;
+
   ocorrencias: OcorrenciaOS[];
   materiais: MaterialOS[];
   checklist: ChecklistItemOS[];
@@ -148,12 +151,15 @@ export const STATUS_LABEL: Record<StatusOS, string> = {
   no_local: 'No local',
   em_execucao: 'Em execução',
   pausada: 'Pausada',
-  // Do ponto de vista do técnico, a atividade em campo terminou aqui —
-  // "aguardando aprovação" é jargão interno; quem decide/vê a fila de
-  // aprovação já sabe que esse status significa "falta o gestor aprovar"
-  // (ver AbaAprovacao em ManutencaoOrderDetail.tsx).
-  aguardando_aprovacao: 'Finalizada',
-  aprovada: 'Aprovada',
+  // Terminal do ponto de vista do técnico — não depende de nenhuma aprovação
+  // manual do gestor/supervisor pra "valer". Supervisor só intervém se
+  // precisar reabrir pra retrabalho (ver AbaAprovacao em ManutencaoOrderDetail.tsx).
+  finalizada: 'Finalizada',
+  // Encerramento definitivo pelo gestor/supervisor — reaproveita o valor
+  // 'aprovada' do banco (já existe na constraint/trigger desde a 0013), só
+  // com um rótulo que não reintroduz a ideia de "aprovação obrigatória" que
+  // o fluxo deixou de exigir.
+  aprovada: 'Encerrada',
   // Retrabalho: gestor/supervisor devolveu a OS pro técnico com uma
   // observação adicional, mas SEM apagar nada do que já foi registrado
   // (ocorrências, materiais, checklist, fotos continuam intactos).
@@ -203,6 +209,18 @@ export const PROBLEMAS_CTO_GRUPOS: { grupo: string; itens: string[] }[] = [
 /** Lista achatada — pra código que só precisa iterar/validar sem se importar com o agrupamento (ex: `SOLUCAO_PROBLEMA_CTO`). */
 export const PROBLEMAS_CTO = PROBLEMAS_CTO_GRUPOS.flatMap((g) => g.itens);
 
+/**
+ * `problemaInformado` é salvo como string serializada por `||` (mesma
+ * convenção usada em PhotoCard.tsx pra descrição de fotos) — várias telas
+ * (execução, detalhe da OS) precisam do array de volta pra exibir cada
+ * ocorrência como item de lista em vez do texto bruto com "||" no meio.
+ */
+export const deserializeProblemas = (value?: string | null): string[] =>
+  value ? value.split('||').map((item) => item.trim()).filter(Boolean) : [];
+
+/** Contraparte de `deserializeProblemas` — usada na abertura da OS e no registro de pendência de vistoria, pra que os dois gravem no mesmo formato. */
+export const serializeProblemas = (selected: string[]): string => selected.join('||');
+
 // A cada problema reportado (na abertura da OS ou numa ocorrência durante a
 // execução) corresponde uma "solução" — é isso que vira item de checklist,
 // não o problema em si (ex: "CTO quebrada" no checklist não faz sentido
@@ -223,3 +241,14 @@ export const SOLUCAO_PROBLEMA_CTO: Record<string, string> = {
   'Drop com conector roubado': 'Conector do drop reinstalado',
   'Drop atenuado': 'Drop substituído/regulado',
 };
+
+/** Tempo decorrido entre abertura e encerramento (ou "agora", se ainda em aberto) — usado na lista e na exportação Excel. */
+export function tempoEmAtendimento(ordem: ManutencaoOrdem): string {
+  const fim = ordem.execucaoFimEm || ordem.aprovadoEm || ordem.canceladoEm;
+  const fimData = fim ? new Date(fim) : new Date();
+  const min = Math.round((fimData.getTime() - new Date(ordem.createdAt).getTime()) / 60000);
+  if (min < 60) return `${min}min`;
+  const horas = Math.floor(min / 60);
+  if (horas < 24) return `${horas}h`;
+  return `${Math.floor(horas / 24)}d`;
+}

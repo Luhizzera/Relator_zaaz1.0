@@ -32,7 +32,7 @@ export function ThemeToggle({ className, variant = "chip" }: ThemeToggleProps) {
           className,
         )}
       >
-        {isDark ? <Sun size={16} /> : <Moon size={16} />}
+        {isDark ? <Sun className="icon-md" /> : <Moon className="icon-md" />}
       </button>
     );
   }
@@ -44,7 +44,7 @@ export function ThemeToggle({ className, variant = "chip" }: ThemeToggleProps) {
       title={label}
       className={cn(iconChipButtonClass, className)}
     >
-      {isDark ? <Sun size={16} /> : <Moon size={16} />}
+      {isDark ? <Sun className="icon-md" /> : <Moon className="icon-md" />}
     </button>
   );
 }

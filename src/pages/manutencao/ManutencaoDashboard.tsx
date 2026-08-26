@@ -2,31 +2,142 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ClipboardList, Clock3, CheckCircle2, ShieldAlert, Ban, AlertTriangle,
   Flame, Siren, Plus, ListFilter, PencilLine, Users, FileBarChart, Loader2, Timer, ArrowRight,
+  ChevronDown, X, Sheet,
 } from 'lucide-react';
 import { useNavigate, NavigateFunction } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
 import { listManutencaoOrders } from '@/lib/manutencaoService';
-import { ManutencaoOrdem, StatusOS, STATUS_LABEL } from '@/types/manutencao';
+import {
+  ManutencaoOrdem, StatusOS, PrioridadeOS, STATUS_LABEL, PRIORIDADE_LABEL, tempoEmAtendimento,
+} from '@/types/manutencao';
+import { exportToXlsx } from '@/lib/xlsxExport';
 import { PageHeader } from '@/components/PageHeader';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
+import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+
+export interface FiltrosDashboard {
+  dataInicial: string;
+  dataFinal: string;
+  tipo: string;
+  prioridade: PrioridadeOS | 'todas';
+  status: StatusOS | 'todas';
+  tecnico: string;
+  cidade: string;
+}
+
+export const FILTROS_DASHBOARD_VAZIOS: FiltrosDashboard = {
+  dataInicial: '', dataFinal: '', tipo: '', prioridade: 'todas', status: 'todas', tecnico: '', cidade: '',
+};
+
+export function distinctSorted(values: (string | undefined)[]): string[] {
+  return Array.from(new Set(values.filter((v): v is string => !!v && v.trim() !== ''))).sort((a, b) => a.localeCompare(b));
+}
+
+/** Barra de filtros do dashboard — período, tipo de atividade, criticidade, status e (gestor/supervisor) técnico. Afeta os cards e os gráficos abaixo. Reaproveitada na home do técnico (Dashboard.tsx). */
+export function FiltrosBar({
+  filtros, setFiltro, limpar, ativos, tipos, tecnicos, cidades, mostrarTecnico,
+}: {
+  filtros: FiltrosDashboard;
+  setFiltro: <K extends keyof FiltrosDashboard>(key: K, value: FiltrosDashboard[K]) => void;
+  limpar: () => void;
+  ativos: boolean;
+  tipos: string[];
+  tecnicos: string[];
+  cidades: string[];
+  mostrarTecnico: boolean;
+}) {
+  const [aberto, setAberto] = useState(ativos);
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
+      <button
+        onClick={() => setAberto((v) => !v)}
+        className={cn(
+          'w-full flex items-center justify-between gap-2 text-sm font-bold transition-colors',
+          ativos ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-300',
+        )}
+      >
+        <span className="flex items-center gap-2">
+          <ListFilter size={15} /> Filtros
+          {ativos && (
+            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+              ativos
+            </span>
+          )}
+        </span>
+        <ChevronDown size={15} className={cn('transition-transform', aberto && 'rotate-180')} />
+      </button>
+
+      {aberto && (
+        <div className={cn('mt-3 grid grid-cols-2 gap-2', mostrarTecnico ? 'md:grid-cols-7' : 'md:grid-cols-6')}>
+          <div className="flex gap-2 col-span-2">
+            <input type="date" value={filtros.dataInicial} onChange={(e) => setFiltro('dataInicial', e.target.value)} title="Período — data inicial" className="w-full px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" />
+            <input type="date" value={filtros.dataFinal} onChange={(e) => setFiltro('dataFinal', e.target.value)} title="Período — data final" className="w-full px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" />
+          </div>
+          <select value={filtros.tipo} onChange={(e) => setFiltro('tipo', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="">Tipo de atividade (todos)</option>
+            {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select value={filtros.prioridade} onChange={(e) => setFiltro('prioridade', e.target.value as PrioridadeOS | 'todas')} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="todas">Criticidade (todas)</option>
+            {Object.entries(PRIORIDADE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <select value={filtros.status} onChange={(e) => setFiltro('status', e.target.value as StatusOS | 'todas')} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="todas">Status (todos)</option>
+            {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <select value={filtros.cidade} onChange={(e) => setFiltro('cidade', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="">Cidade (todas)</option>
+            {cidades.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {mostrarTecnico && (
+            <select value={filtros.tecnico} onChange={(e) => setFiltro('tecnico', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+              <option value="">Técnico (todos)</option>
+              {tecnicos.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+          {ativos && (
+            <button
+              onClick={limpar}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-transparent"
+            >
+              <X size={13} /> Limpar filtros
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function StatCard({
   icon: Icon,
   label,
   value,
   accent,
+  onClick,
 }: {
   icon: any;
   label: string;
   value: number | string;
   accent: string;
+  /** Quando presente, o card vira atalho pra lista já filtrada — sem isso o
+      gestor via o número mas tinha que ir refazer o filtro manualmente. */
+  onClick?: () => void;
 }) {
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3 shadow-sm">
+    <Tag
+      onClick={onClick}
+      className={cn(
+        'bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3 shadow-sm w-full text-left',
+        onClick && 'hover:border-amber-300 hover:shadow-md transition-all cursor-pointer active:scale-[0.98]',
+      )}
+    >
       <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', accent)}>
         <Icon size={18} />
       </div>
@@ -34,7 +145,7 @@ function StatCard({
         <p className="text-2xl font-black text-slate-800 dark:text-slate-100 leading-none">{value}</p>
         <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mt-1">{label}</p>
       </div>
-    </div>
+    </Tag>
   );
 }
 
@@ -124,13 +235,15 @@ function formatMinutos(min: number): string {
   return h > 0 ? `${h}h${m.toString().padStart(2, '0')}min` : `${m}min`;
 }
 
-function OrdensRecentes({
-  orders, navigate, vazio, isTecnico,
+/** Reaproveitada na home do técnico (Dashboard.tsx) — lista compacta com badge "Nova" nas OS ainda não recebidas. */
+export function OrdensRecentes({
+  orders, navigate, vazio, isTecnicoManutencao,
 }: {
   orders: ManutencaoOrdem[];
   navigate: NavigateFunction;
   vazio: string;
-  isTecnico: boolean;
+  /** Só o Técnico de Manutenção vai pra execução mobile e recebe o alerta de "Nova" — o Técnico LA só acompanha, então cai na tela de detalhe (leitura). */
+  isTecnicoManutencao: boolean;
 }) {
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
@@ -140,8 +253,8 @@ function OrdensRecentes({
         {orders.slice(0, 6).map((o) => {
           // Delegada/devolvida e ainda não recebida pelo técnico — mesmo
           // conceito de "não lida" usado no badge do Dashboard/QuickAction.
-          const nova = isTecnico && (o.status === 'atribuida' || o.status === 'reaberta');
-          const destino = isTecnico ? `/manutencao/ordens/${o.id}/execucao` : `/manutencao/ordens/${o.id}`;
+          const nova = isTecnicoManutencao && (o.status === 'atribuida' || o.status === 'reaberta');
+          const destino = isTecnicoManutencao ? `/manutencao/ordens/${o.id}/execucao` : `/manutencao/ordens/${o.id}`;
           return (
             <div
               key={o.id}
@@ -201,15 +314,33 @@ function DashboardGestor({
     // não só o status literal 'aberta'. Mesma definição usada no painel do
     // técnico (MeuPainelManutencao, abaixo) e na home (Dashboard.tsx).
     const abertas = orders.filter((o) => o.status === 'aberta' || o.status === 'atribuida' || o.status === 'reaberta').length;
+    // Só o status literal 'aberta' — nenhum técnico atribuído ainda. É o
+    // mesmo recorte da fila de atribuição em ManutencaoOrdersList.tsx, usado
+    // aqui pro alerta que faltava na home do gestor.
+    const aguardandoAtribuicao = orders.filter((o) => o.status === 'aberta').length;
     const emAndamento = orders.filter((o) =>
       ['recebida', 'deslocamento', 'no_local', 'em_execucao', 'pausada'].includes(o.status),
     ).length;
-    const concluidasHoje = orders.filter((o) => o.status === 'concluida').length;
-    const aguardandoAprovacao = orders.filter((o) => o.status === 'aguardando_aprovacao').length;
+    // 'concluida' sozinho nunca é setado pelo service — o fluxo real termina
+    // em 'finalizada' (o técnico marca sozinho, sem depender de aprovação) ou,
+    // no legado, em 'aprovada'. Contar só 'concluida' subestimava (zerava) o indicador.
+    const concluidas = orders.filter((o) => ['concluida', 'aprovada', 'finalizada'].includes(o.status)).length;
+    // Finalizada não bloqueia nada — é só um indicador de "concluído
+    // recentemente" pro supervisor saber onde reabrir se precisar.
+    const finalizadas = orders.filter((o) => o.status === 'finalizada').length;
     const canceladas = orders.filter((o) => o.status === 'cancelada').length;
     const prioridadeAlta = orders.filter((o) => o.prioridade === 'alta' || o.prioridade === 'critica').length;
     const ocorrenciasCriticas = orders.reduce((sum, o) => sum + o.ocorrencias.length, 0);
-    return { abertas, emAndamento, concluidasHoje, aguardandoAprovacao, canceladas, prioridadeAlta, ocorrenciasCriticas };
+    // "Vencidas" — prazo (data_prevista, coluna `date` sem hora) já passou e a
+    // OS ainda não foi encerrada de nenhuma forma. Comparação por string
+    // (YYYY-MM-DD) evita fuso horário criando Date a partir de uma data pura.
+    const hojeStr = new Date().toISOString().slice(0, 10);
+    const vencidas = orders.filter((o) =>
+      !!o.dataPrevista
+      && o.dataPrevista < hojeStr
+      && !['concluida', 'aprovada', 'finalizada', 'cancelada'].includes(o.status),
+    ).length;
+    return { abertas, aguardandoAtribuicao, emAndamento, concluidas, finalizadas, canceladas, prioridadeAlta, ocorrenciasCriticas, vencidas };
   }, [orders]);
 
   const graficos = useMemo(() => {
@@ -238,13 +369,14 @@ function DashboardGestor({
   return (
     <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard icon={ClipboardList} label="OS Abertas" value={stats.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
-        <StatCard icon={Clock3} label="Em andamento" value={stats.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
-        <StatCard icon={CheckCircle2} label="Concluídas hoje" value={stats.concluidasHoje} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
-        <StatCard icon={ShieldAlert} label="Finalizadas (para aprovar)" value={stats.aguardandoAprovacao} accent="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
-        <StatCard icon={Ban} label="Canceladas" value={stats.canceladas} accent="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" />
-        <StatCard icon={AlertTriangle} label="Vencidas" value={0} accent="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" />
-        <StatCard icon={Flame} label="Prioridade alta" value={stats.prioridadeAlta} accent="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400" />
+        <StatCard icon={ClipboardList} label="OS Abertas" value={stats.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" onClick={() => navigate('/manutencao/ordens?grupo=abertas')} />
+        <StatCard icon={Clock3} label="Em andamento" value={stats.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" onClick={() => navigate('/manutencao/ordens?grupo=andamento')} />
+        <StatCard icon={CheckCircle2} label="Concluídas" value={stats.concluidas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" onClick={() => navigate('/manutencao/ordens?grupo=concluidas')} />
+        <StatCard icon={ShieldAlert} label="Finalizadas" value={stats.finalizadas} accent="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" onClick={() => navigate('/manutencao/ordens?status=finalizada')} />
+        <StatCard icon={Ban} label="Canceladas" value={stats.canceladas} accent="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" onClick={() => navigate('/manutencao/ordens?status=cancelada')} />
+        <StatCard icon={AlertTriangle} label="Vencidas" value={stats.vencidas} accent="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" onClick={() => navigate('/manutencao/ordens?vencidas=1')} />
+        <StatCard icon={Flame} label="Prioridade alta" value={stats.prioridadeAlta} accent="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400" onClick={() => navigate('/manutencao/ordens?grupo=prioridade_alta')} />
+        {/* Ocorrências e tempo médio são agregados sem uma lista equivalente pra deep-linkar — permanecem só informativos. */}
         <StatCard icon={Siren} label="Ocorrências" value={stats.ocorrenciasCriticas} accent="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
         <StatCard
           icon={Timer}
@@ -253,6 +385,24 @@ function DashboardGestor({
           accent="bg-cyan-100 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400"
         />
       </div>
+
+      {/* A home do gestor não tinha nenhum alerta de OS parada esperando
+          técnico — só existia na lista (ManutencaoOrdersList.tsx), que o
+          gestor só via se fosse até lá conferir. */}
+      {stats.aguardandoAtribuicao > 0 && (
+        <button
+          onClick={() => navigate('/manutencao/ordens?status=aberta')}
+          className="w-full flex items-center justify-between gap-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-4 hover:bg-amber-100/60 dark:hover:bg-amber-900/20 transition-colors text-left"
+        >
+          <span className="text-sm font-black text-amber-800 dark:text-amber-400 flex items-center gap-2">
+            <ClipboardList size={16} />
+            {stats.aguardandoAtribuicao} OS aguardando atribuição de técnico
+          </span>
+          <span className="flex items-center gap-1 text-xs font-bold text-amber-700 dark:text-amber-400 shrink-0">
+            Ver e delegar <ArrowRight size={13} />
+          </span>
+        </button>
+      )}
 
       <div>
         <h2 className="text-sm font-black text-slate-700 dark:text-slate-200 mb-3">Gráficos</h2>
@@ -278,62 +428,25 @@ function DashboardGestor({
         </div>
       </div>
 
-      <OrdensRecentes orders={orders} navigate={navigate} vazio="Nenhuma ordem de manutenção cadastrada ainda." isTecnico={false} />
-    </>
-  );
-}
-
-/** Visão simplificada — técnico (LA ou manutenção). Só o que é relevante pro próprio trabalho de campo. */
-function MeuPainelManutencao({
-  orders,
-  navigate,
-  onNovaOS,
-  isTecnico,
-}: {
-  orders: ManutencaoOrdem[];
-  navigate: NavigateFunction;
-  onNovaOS: () => void;
-  isTecnico: boolean;
-}) {
-  const stats = useMemo(() => {
-    // Mesma definição de "Abertas" usada em DashboardGestor/Dashboard.tsx —
-    // atribuída e reaberta ainda não foram iniciadas em campo, então contam
-    // como "abertas" (precisam de ação do técnico), não "em andamento".
-    const abertas = orders.filter((o) => o.status === 'aberta' || o.status === 'atribuida' || o.status === 'reaberta').length;
-    const emAndamento = orders.filter((o) =>
-      ['recebida', 'deslocamento', 'no_local', 'em_execucao', 'pausada'].includes(o.status),
-    ).length;
-    const aguardandoAprovacao = orders.filter((o) => o.status === 'aguardando_aprovacao').length;
-    const concluidas = orders.filter((o) => o.status === 'concluida' || o.status === 'aprovada').length;
-    // Delegadas (ou devolvidas) e ainda não recebidas — o "alerta" de OS nova.
-    const novas = orders.filter((o) => o.status === 'atribuida' || o.status === 'reaberta').length;
-    return { abertas, emAndamento, aguardandoAprovacao, concluidas, novas };
-  }, [orders]);
-
-  return (
-    <>
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard icon={ClipboardList} label="Abertas" value={stats.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
-        <StatCard icon={Clock3} label="Em andamento" value={stats.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
-        <StatCard icon={ShieldAlert} label="Finalizadas (para aprovar)" value={stats.aguardandoAprovacao} accent="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
-        <StatCard icon={CheckCircle2} label="Concluídas" value={stats.concluidas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <QuickAction icon={Plus} label="Nova OS" onClick={onNovaOS} />
-        <QuickAction icon={ListFilter} label="Minhas Ordens" onClick={() => navigate('/manutencao/ordens')} badge={stats.novas} />
-      </div>
-
-      <OrdensRecentes orders={orders} navigate={navigate} vazio="Nenhuma OS aberta ou delegada a você ainda." isTecnico={isTecnico} />
+      <OrdensRecentes orders={orders} navigate={navigate} vazio="Nenhuma ordem de manutenção cadastrada ainda." isTecnicoManutencao={false} />
     </>
   );
 }
 
 export default function ManutencaoDashboard() {
   const navigate = useNavigate();
-  const { isGestor, canManageOrders, isTecnico } = useAuth();
+  const { isGestor, canManageOrders } = useAuth();
   const [orders, setOrders] = useState<ManutencaoOrdem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filtros, setFiltros] = useState<FiltrosDashboard>(FILTROS_DASHBOARD_VAZIOS);
+  const [exportando, setExportando] = useState(false);
+
+  // O painel do técnico foi incorporado na home (Dashboard.tsx) — essa tela
+  // agora é só do gestor/supervisor. Quem não gerencia OS é redirecionado
+  // pra "/" em vez de ver um "Meu Painel" duplicado aqui.
+  useEffect(() => {
+    if (!canManageOrders) navigate('/', { replace: true });
+  }, [canManageOrders, navigate]);
 
   // `silencioso` evita piscar o spinner de tela cheia quando o realtime
   // recarrega em segundo plano — só a carga inicial mostra o loading.
@@ -345,7 +458,7 @@ export default function ManutencaoDashboard() {
       .finally(() => { if (!silencioso) setLoading(false); });
   }, []);
 
-  useEffect(() => { carregar(); }, [carregar]);
+  useEffect(() => { if (canManageOrders) carregar(); }, [carregar, canManageOrders]);
 
   useRealtimeRefresh([{ table: 'ordens_manutencao' }], () => carregar(true));
 
@@ -353,30 +466,124 @@ export default function ManutencaoDashboard() {
     navigate('/manutencao/nova');
   };
 
+  const setFiltro = <K extends keyof FiltrosDashboard>(key: K, value: FiltrosDashboard[K]) =>
+    setFiltros((prev) => ({ ...prev, [key]: value }));
+
+  const tiposDisponiveis = useMemo(() => distinctSorted(orders.map((o) => o.tipo)), [orders]);
+  // Técnico só faz sentido pra quem vê a fila inteira (gestor/supervisor) —
+  // o próprio técnico já só enxerga as OS dele, filtrar por si mesmo não ajuda.
+  const tecnicosDisponiveis = useMemo(() => distinctSorted(orders.map((o) => o.tecnico)), [orders]);
+  const cidadesDisponiveis = useMemo(() => distinctSorted(orders.map((o) => o.municipio)), [orders]);
+
+  const filtrosAtivos = Object.entries(filtros).some(([k, v]) => v !== (FILTROS_DASHBOARD_VAZIOS as any)[k]);
+
+  // Cards e gráficos abaixo consomem só o resultado filtrado — período
+  // (createdAt), tipo de atividade, criticidade (prioridade), status, cidade e técnico.
+  const ordersFiltradas = useMemo(() => {
+    if (!filtrosAtivos) return orders;
+    return orders.filter((o) => {
+      if (filtros.dataInicial && o.createdAt < filtros.dataInicial) return false;
+      if (filtros.dataFinal && o.createdAt > `${filtros.dataFinal}T23:59:59`) return false;
+      if (filtros.tipo && o.tipo !== filtros.tipo) return false;
+      if (filtros.prioridade !== 'todas' && o.prioridade !== filtros.prioridade) return false;
+      if (filtros.status !== 'todas' && o.status !== filtros.status) return false;
+      if (filtros.tecnico && o.tecnico !== filtros.tecnico) return false;
+      if (filtros.cidade && o.municipio !== filtros.cidade) return false;
+      return true;
+    });
+  }, [orders, filtros, filtrosAtivos]);
+
+  // Exporta exatamente o que os filtros acima deixaram visível — mesmo
+  // princípio já usado em ManutencaoOrdersList.tsx: nunca exporta o
+  // universo inteiro quando há um recorte aplicado na tela.
+  const handleExportarExcel = async () => {
+    setExportando(true);
+    try {
+      await exportToXlsx(
+        'ordens-manutencao',
+        'Ordens de Manutenção',
+        [
+          { header: 'Número', key: 'numero', width: 16 },
+          { header: 'Status', key: 'status', width: 20 },
+          { header: 'Prioridade', key: 'prioridade', width: 12 },
+          { header: 'Tipo', key: 'tipo', width: 20 },
+          { header: 'Solicitante', key: 'solicitante', width: 22 },
+          { header: 'Cidade', key: 'cidade', width: 18 },
+          { header: 'UTM', key: 'utm', width: 24 },
+          { header: 'Equipe', key: 'equipe', width: 16 },
+          { header: 'Técnico', key: 'tecnico', width: 20 },
+          { header: 'Abertura', key: 'abertura', width: 14, type: 'date' },
+          { header: 'Tempo em atendimento', key: 'tempo', width: 18 },
+        ],
+        ordersFiltradas.map((o) => ({
+          numero: o.numero,
+          status: STATUS_LABEL[o.status],
+          prioridade: PRIORIDADE_LABEL[o.prioridade],
+          tipo: o.tipo,
+          solicitante: o.solicitante,
+          cidade: o.municipio ?? '',
+          utm: o.latitude != null && o.longitude != null ? `${o.latitude.toFixed(6)}, ${o.longitude.toFixed(6)}` : '',
+          equipe: o.equipe ?? '',
+          tecnico: o.tecnico ?? '',
+          abertura: new Date(o.createdAt),
+          tempo: tempoEmAtendimento(o),
+        })),
+      );
+    } catch (err) {
+      console.error('[Manutencao] Erro ao exportar Excel:', err);
+      toast({ title: 'Não foi possível exportar', variant: 'destructive' });
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  if (!canManageOrders) return null; // redirecionando pra "/" (useEffect acima)
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-6 space-y-6">
       <PageHeader
-        title={canManageOrders ? 'Manutenção' : 'Meu Painel'}
+        title="Manutenção"
         backTo="/"
-        subtitle={canManageOrders ? 'Visão geral das ordens de serviço de campo' : 'Suas ordens de serviço de campo'}
+        subtitle="Visão geral das ordens de serviço de campo"
         rightContent={
-          <button
-            onClick={handleNovaOSManutencao}
-            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-sm transition-colors"
-          >
-            <Plus size={16} /> Nova OS
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportarExcel}
+              disabled={exportando}
+              title={filtrosAtivos ? 'Exporta só as OS que passam pelos filtros aplicados' : 'Exporta todas as OS'}
+              className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm font-bold px-3.5 py-2.5 rounded-xl transition-colors disabled:opacity-60"
+            >
+              {exportando ? <Loader2 size={16} className="animate-spin" /> : <Sheet size={16} />} Excel
+            </button>
+            <button
+              onClick={handleNovaOSManutencao}
+              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-sm transition-colors"
+            >
+              <Plus size={16} /> Nova OS
+            </button>
+          </div>
         }
       />
+
+      {!loading && (
+        <FiltrosBar
+          filtros={filtros}
+          setFiltro={setFiltro}
+          limpar={() => setFiltros(FILTROS_DASHBOARD_VAZIOS)}
+          ativos={filtrosAtivos}
+          tipos={tiposDisponiveis}
+          tecnicos={tecnicosDisponiveis}
+          cidades={cidadesDisponiveis}
+          mostrarTecnico={canManageOrders}
+        />
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-400">
           <Loader2 className="animate-spin mr-2" size={18} /> Carregando...
         </div>
-      ) : canManageOrders ? (
-        <DashboardGestor orders={orders} navigate={navigate} onNovaOS={handleNovaOSManutencao} isGestor={isGestor} />
       ) : (
-        <MeuPainelManutencao orders={orders} navigate={navigate} onNovaOS={handleNovaOSManutencao} isTecnico={isTecnico} />
+        <DashboardGestor orders={ordersFiltradas} navigate={navigate} onNovaOS={handleNovaOSManutencao} isGestor={isGestor} />
       )}
     </div>
   );

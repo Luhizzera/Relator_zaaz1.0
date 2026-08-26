@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { Loader2 } from 'lucide-react';
 import { Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
@@ -6,6 +7,7 @@ import { OrdersProvider } from '@/contexts/OrdersContext';
 import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext';
 import Login from '@/pages/Login';
 import CompleteProfile from '@/pages/CompleteProfile';
+import ResetPassword from '@/pages/ResetPassword';
 import Dashboard from '@/pages/Dashboard';
 import OrdersList from '@/pages/OrdersList';
 import UserManagement from '@/pages/UserManagement';
@@ -18,14 +20,26 @@ import ManutencaoOrderDetail from '@/pages/manutencao/ManutencaoOrderDetail';
 import ManutencaoExecucaoMobile from '@/pages/manutencao/ManutencaoExecucaoMobile';
 import NovaOrdemManutencao from '@/pages/manutencao/NovaOrdemManutencao';
 import MinhaEquipe from '@/pages/manutencao/MinhaEquipe';
+import VistoriaOrdersList from '@/pages/vistoria/VistoriaOrdersList';
+import VistoriaExecucaoMobile from '@/pages/vistoria/VistoriaExecucaoMobile';
+import VistoriaBacklogMap from '@/pages/vistoria/VistoriaBacklogMap';
 import { AppSidebar } from '@/components/AppSidebar';
 import { Toaster } from '@/components/ui/toaster';
 
+/** Tela cheia usada nos dois momentos em que ainda não há nada pra mostrar (sessão ou perfil carregando) — sem isso a tela fica em branco, indistinguível de um link quebrado no primeiro acesso. */
+function FullScreenLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-950">
+      <Loader2 className="animate-spin text-slate-400" size={28} />
+    </div>
+  );
+}
+
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { session, profile, loading } = useAuth();
-  if (loading) return null; // ou um spinner
+  if (loading) return <FullScreenLoading />;
   if (!session) return <Login />;
-  if (!profile) return null; // perfil ainda carregando logo após a sessão aparecer
+  if (!profile) return <FullScreenLoading />; // perfil ainda carregando logo após a sessão aparecer
   if (!profile.nome_definido) return <CompleteProfile />;
   return children;
 }
@@ -44,6 +58,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<RequireAuth><HomeRoute /></RequireAuth>} />
+      <Route path="/redefinir-senha" element={<RequireAuth><ResetPassword /></RequireAuth>} />
       <Route path="/ordens" element={<RequireAuth><OrdersList /></RequireAuth>} />
       <Route path="/ordens/:id" element={<RequireAuth><OrdemEditor /></RequireAuth>} />
       <Route path="/ordens/:id/fotos" element={<RequireAuth><OrdemFotos /></RequireAuth>} />
@@ -54,6 +69,9 @@ function AppRoutes() {
       <Route path="/manutencao/ordens/:id" element={<RequireAuth><ManutencaoOrderDetail /></RequireAuth>} />
       <Route path="/manutencao/ordens/:id/execucao" element={<RequireAuth><ManutencaoExecucaoMobile /></RequireAuth>} />
       <Route path="/manutencao/equipe" element={<RequireAuth><MinhaEquipe /></RequireAuth>} />
+      <Route path="/vistoria/ordens" element={<RequireAuth><VistoriaOrdersList /></RequireAuth>} />
+      <Route path="/vistoria/ordens/:id/execucao" element={<RequireAuth><VistoriaExecucaoMobile /></RequireAuth>} />
+      <Route path="/vistoria/backlog" element={<RequireAuth><VistoriaBacklogMap /></RequireAuth>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

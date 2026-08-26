@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { X, LayoutDashboard, ClipboardList, Wrench, ListChecks, Users, Users2, LogOut } from 'lucide-react';
+import { X, LayoutDashboard, ClipboardList, Wrench, ListChecks, Users, Users2, LogOut, Route as RouteIcon } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -26,12 +26,16 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, onClose]);
 
+  // `sub: true` marca telas que são um detalhe/recorte de "Manutenção" (a
+  // dashboard-resumo logo acima) — sem isso, os dois links pareciam duas
+  // seções soltas e igualmente importantes, em vez de resumo → detalhe.
   const links = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/ordens', label: 'Relatórios', icon: ClipboardList },
     { to: '/manutencao', label: 'Manutenção', icon: Wrench },
-    { to: '/manutencao/ordens', label: 'Ordens de Manutenção', icon: ListChecks },
-    ...(canManageOrders ? [{ to: '/manutencao/equipe', label: isGestor ? 'Equipes' : 'Minha Equipe', icon: Users2 }] : []),
+    { to: '/manutencao/ordens', label: 'Ordens de Manutenção', icon: ListChecks, sub: true },
+    ...(canManageOrders ? [{ to: '/manutencao/equipe', label: isGestor ? 'Equipes' : 'Minha Equipe', icon: Users2, sub: true }] : []),
+    { to: '/vistoria/ordens', label: 'Vistoria', icon: RouteIcon },
     ...(isGestor ? [{ to: '/usuarios', label: 'Usuários', icon: Users }] : []),
   ];
 
@@ -100,13 +104,14 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                 key={link.to}
                 onClick={() => handleNavigate(link.to)}
                 className={cn(
-                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors text-left',
+                  'w-full flex items-center gap-3 rounded-xl transition-colors text-left',
+                  link.sub ? 'ml-4 px-3 py-2 text-xs font-semibold' : 'px-3 py-2.5 text-sm font-bold',
                   active
                     ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
                     : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800',
                 )}
               >
-                <Icon size={17} /> {link.label}
+                <Icon size={link.sub ? 14 : 17} /> {link.label}
               </button>
             );
           })}

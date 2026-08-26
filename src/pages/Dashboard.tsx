@@ -2,14 +2,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ClipboardList, CheckCircle2, Clock, Download, Camera, MapPin, Plus, Loader2, Menu, LogOut,
-  FileText, Wrench, ShieldAlert, ArrowRight,
+  FileText, Wrench, ShieldAlert, ArrowRight, Sheet, Route as RouteIcon,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useOrders } from '@/contexts/OrdersContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { listManutencaoOrders } from '@/lib/manutencaoService';
+import { listOrdensVistoria } from '@/lib/vistoriaService';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
+import { exportToXlsx } from '@/lib/xlsxExport';
+import { STATUS_LABEL as STATUS_LABEL_MANUTENCAO, PRIORIDADE_LABEL, tempoEmAtendimento } from '@/types/manutencao';
+import { STATUS_VISTORIA_LABEL } from '@/types/vistoria';
+import {
+  FiltrosBar, OrdensRecentes, FILTROS_DASHBOARD_VAZIOS, distinctSorted,
+} from '@/pages/manutencao/ManutencaoDashboard';
+import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { NovaOSModal } from '@/components/NovaOSModal';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -29,11 +37,18 @@ const STATUS_COLOR: Record<string, string> = {
   cancelada: 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
 };
 
+const STATUS_VISTORIA_COLOR: Record<string, string> = {
+  aberta: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+  em_andamento: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  concluida: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+  cancelada: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400',
+};
+
 function StatCard({ icon: Icon, label, value, accent }: any) {
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3 shadow-sm">
       <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', accent)}>
-        <Icon size={18} />
+        <Icon className="icon-md" />
       </div>
       <div>
         <p className="text-2xl font-black text-slate-800 dark:text-slate-100 leading-none">{value}</p>
@@ -49,7 +64,7 @@ function SectionHeader({ icon: Icon, title, accent, action, badge }: any) {
     <div className="flex items-center justify-between gap-3 mb-3">
       <h2 className="flex items-center gap-2 text-base font-black text-slate-800 dark:text-slate-100">
         <span className={cn('w-7 h-7 rounded-lg flex items-center justify-center', accent)}>
-          <Icon size={15} />
+          <Icon className="icon-sm" />
         </span>
         {title}
         {/* Alerta estilo "notificação não lida" — OS novas delegadas ao técnico que ele ainda não recebeu. */}
@@ -69,7 +84,7 @@ function SectionHeader({ icon: Icon, title, accent, action, badge }: any) {
 
 export default function Dashboard() {
   const { orders, loadingOrders, refreshOrders, createOrder } = useOrders();
-  const { profile, canManageOrders, signOut } = useAuth();
+  const { profile, canManageOrders, signOut, isTecnicoManutencao, isTecnicoLA } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => { refreshOrders(); }, [refreshOrders]);
@@ -98,36 +113,133 @@ export default function Dashboard() {
   const [showNovaOSModal, setShowNovaOSModal] = useState(false);
   const { open: openSidebar } = useSidebar();
 
-  // Resumo condensado do domínio de Manutenção — dividido visualmente do de
-  // Relatório Fotográfico, com atalho pro dashboard completo (/manutencao).
+  // A home do técnico agora é o "Meu Painel" completo — filtros, exportação
+  // e ordens recentes de Manutenção, que antes só existiam numa tela
+  // separada (/manutencao). Essa aba deixou de existir pro técnico (ver
+  // redirect em ManutencaoDashboard.tsx); tudo mora aqui agora.
   const [loadingManutencao, setLoadingManutencao] = useState(true);
-  const [statsManutencao, setStatsManutencao] = useState({ abertas: 0, emAndamento: 0, aguardandoAprovacao: 0, concluidas: 0, novas: 0 });
+  const [ordensManutencao, setOrdensManutencao] = useState([]);
+  const [filtrosManutencao, setFiltrosManutencao] = useState(FILTROS_DASHBOARD_VAZIOS);
+  const [exportandoManutencao, setExportandoManutencao] = useState(false);
 
   const carregarManutencao = () => {
     setLoadingManutencao(true);
     listManutencaoOrders()
-      .then((ordensManutencao) => {
-        setStatsManutencao({
-          // Mesma definição usada em ManutencaoDashboard.tsx — atribuída e
-          // reaberta ainda não foram iniciadas em campo, contam como "abertas".
-          abertas: ordensManutencao.filter((o) => o.status === 'aberta' || o.status === 'atribuida' || o.status === 'reaberta').length,
-          emAndamento: ordensManutencao.filter((o) =>
-            ['recebida', 'deslocamento', 'no_local', 'em_execucao', 'pausada'].includes(o.status),
-          ).length,
-          aguardandoAprovacao: ordensManutencao.filter((o) => o.status === 'aguardando_aprovacao').length,
-          concluidas: ordensManutencao.filter((o) => ['concluida', 'aprovada'].includes(o.status)).length,
-          // OS delegadas ao técnico que ele ainda não "recebeu" — o alerta de
-          // notificação não lida na home é sobre essas, não faz sentido pro
-          // gestor/supervisor (que vê a fila inteira da empresa, não a dele).
-          novas: ordensManutencao.filter((o) => o.status === 'atribuida' || o.status === 'reaberta').length,
-        });
-      })
+      .then(setOrdensManutencao)
       .catch((err) => console.error('[Dashboard] Erro ao carregar resumo de manutenção:', err))
       .finally(() => setLoadingManutencao(false));
   };
 
   useEffect(carregarManutencao, []);
   useRealtimeRefresh([{ table: 'ordens_manutencao' }], carregarManutencao);
+
+  const setFiltroManutencao = (key, value) => setFiltrosManutencao((prev) => ({ ...prev, [key]: value }));
+  const filtrosManutencaoAtivos = Object.entries(filtrosManutencao).some(([k, v]) => v !== FILTROS_DASHBOARD_VAZIOS[k]);
+
+  // A RLS deixa quem ABRIU a OS (responsavel_id) enxergá-la pra sempre, mesmo
+  // depois de delegada — correto pra ele poder consultar, mas errado pra
+  // tratar como fila de trabalho dele. Mesmo recorte de ManutencaoOrdersList.tsx:
+  // só o Técnico de Manutenção tem fila de execução (tecnico_id); o Técnico
+  // LA só acompanha o que ele mesmo abriu.
+  const minhasOrdensManutencao = useMemo(() => {
+    if (canManageOrders || !profile) return ordensManutencao;
+    if (isTecnicoManutencao) return ordensManutencao.filter((o) => o.tecnicoId === profile.id);
+    return ordensManutencao.filter((o) => o.responsavelId === profile.id);
+  }, [ordensManutencao, canManageOrders, isTecnicoManutencao, profile]);
+
+  const tiposManutencaoDisponiveis = useMemo(() => distinctSorted(minhasOrdensManutencao.map((o) => o.tipo)), [minhasOrdensManutencao]);
+  const cidadesManutencaoDisponiveis = useMemo(() => distinctSorted(minhasOrdensManutencao.map((o) => o.municipio)), [minhasOrdensManutencao]);
+
+  const ordensManutencaoFiltradas = useMemo(() => {
+    if (!filtrosManutencaoAtivos) return minhasOrdensManutencao;
+    return minhasOrdensManutencao.filter((o) => {
+      if (filtrosManutencao.dataInicial && o.createdAt < filtrosManutencao.dataInicial) return false;
+      if (filtrosManutencao.dataFinal && o.createdAt > `${filtrosManutencao.dataFinal}T23:59:59`) return false;
+      if (filtrosManutencao.tipo && o.tipo !== filtrosManutencao.tipo) return false;
+      if (filtrosManutencao.prioridade !== 'todas' && o.prioridade !== filtrosManutencao.prioridade) return false;
+      if (filtrosManutencao.status !== 'todas' && o.status !== filtrosManutencao.status) return false;
+      if (filtrosManutencao.cidade && o.municipio !== filtrosManutencao.cidade) return false;
+      return true;
+    });
+  }, [minhasOrdensManutencao, filtrosManutencao, filtrosManutencaoAtivos]);
+
+  const statsManutencao = useMemo(() => {
+    const abertas = ordensManutencaoFiltradas.filter((o) => o.status === 'aberta' || o.status === 'atribuida' || o.status === 'reaberta').length;
+    const emAndamento = ordensManutencaoFiltradas.filter((o) =>
+      ['recebida', 'deslocamento', 'no_local', 'em_execucao', 'pausada'].includes(o.status),
+    ).length;
+    const finalizadas = ordensManutencaoFiltradas.filter((o) => o.status === 'finalizada').length;
+    const concluidas = ordensManutencaoFiltradas.filter((o) => ['concluida', 'aprovada', 'finalizada'].includes(o.status)).length;
+    // Badge "Manutenção" — tudo que ainda não chegou em "Iniciar Execução"
+    // (mesma definição do painel de Manutenção do técnico).
+    const naoIniciadas = ordensManutencaoFiltradas.filter((o) =>
+      ['atribuida', 'reaberta', 'recebida', 'deslocamento', 'no_local'].includes(o.status),
+    ).length;
+    return { abertas, emAndamento, finalizadas, concluidas, naoIniciadas };
+  }, [ordensManutencaoFiltradas]);
+
+  // Exporta exatamente o que os filtros deixaram visível.
+  const handleExportarManutencaoExcel = async () => {
+    setExportandoManutencao(true);
+    try {
+      await exportToXlsx(
+        'ordens-manutencao',
+        'Ordens de Manutenção',
+        [
+          { header: 'Número', key: 'numero', width: 16 },
+          { header: 'Status', key: 'status', width: 20 },
+          { header: 'Prioridade', key: 'prioridade', width: 12 },
+          { header: 'Tipo', key: 'tipo', width: 20 },
+          { header: 'Solicitante', key: 'solicitante', width: 22 },
+          { header: 'Cidade', key: 'cidade', width: 18 },
+          { header: 'UTM', key: 'utm', width: 24 },
+          { header: 'Abertura', key: 'abertura', width: 14, type: 'date' },
+          { header: 'Tempo em atendimento', key: 'tempo', width: 18 },
+        ],
+        ordensManutencaoFiltradas.map((o) => ({
+          numero: o.numero,
+          status: STATUS_LABEL_MANUTENCAO[o.status],
+          prioridade: PRIORIDADE_LABEL[o.prioridade],
+          tipo: o.tipo,
+          solicitante: o.solicitante,
+          cidade: o.municipio ?? '',
+          utm: o.latitude != null && o.longitude != null ? `${o.latitude.toFixed(6)}, ${o.longitude.toFixed(6)}` : '',
+          abertura: new Date(o.createdAt),
+          tempo: tempoEmAtendimento(o),
+        })),
+      );
+    } catch (err) {
+      console.error('[Dashboard] Erro ao exportar Excel de manutenção:', err);
+      toast({ title: 'Não foi possível exportar', variant: 'destructive' });
+    } finally {
+      setExportandoManutencao(false);
+    }
+  };
+
+  // Seção "Vistoria" abaixo de Manutenção — só o Técnico de Manutenção
+  // executa rotas de vistoria (mesmo recorte do atalho de ícone já existente
+  // no cabeçalho); RLS de listOrdensVistoria já devolve só as rotas dele
+  // (tecnico_id = auth.uid()), sem precisar filtrar aqui.
+  const [loadingVistoria, setLoadingVistoria] = useState(true);
+  const [ordensVistoria, setOrdensVistoria] = useState([]);
+
+  const carregarVistoria = () => {
+    setLoadingVistoria(true);
+    listOrdensVistoria()
+      .then(setOrdensVistoria)
+      .catch((err) => console.error('[Dashboard] Erro ao carregar rotas de vistoria:', err))
+      .finally(() => setLoadingVistoria(false));
+  };
+
+  useEffect(() => { if (isTecnicoManutencao) carregarVistoria(); }, [isTecnicoManutencao]);
+  useRealtimeRefresh([{ table: 'ordens_vistoria' }], () => { if (isTecnicoManutencao) carregarVistoria(); });
+
+  const statsVistoria = useMemo(() => {
+    const abertas = ordensVistoria.filter((o) => o.status === 'aberta').length;
+    const emAndamento = ordensVistoria.filter((o) => o.status === 'em_andamento').length;
+    const concluidas = ordensVistoria.filter((o) => o.status === 'concluida').length;
+    return { abertas, emAndamento, concluidas };
+  }, [ordensVistoria]);
 
   const handleSelectRelatorio = async () => {
     setShowNovaOSModal(false);
@@ -151,7 +263,7 @@ export default function Dashboard() {
               title="Menu"
               className={iconChipButtonClass}
             >
-              <Menu size={18} />
+              <Menu className="icon-md" />
             </button>
           ) : (
             <button
@@ -160,7 +272,7 @@ export default function Dashboard() {
               title="Sair da conta"
               className={iconChipButtonClass}
             >
-              <LogOut size={18} />
+              <LogOut className="icon-md" />
             </button>
           )}
           <div className="min-w-0">
@@ -171,11 +283,21 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {isTecnicoManutencao && (
+            <button
+              onClick={() => navigate('/vistoria/ordens')}
+              title="Vistoria"
+              aria-label="Vistoria"
+              className={iconChipButtonClass}
+            >
+              <RouteIcon className="icon-md" />
+            </button>
+          )}
           <button
             onClick={() => setShowNovaOSModal(true)}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-sm transition-colors"
           >
-            <Plus size={16} /> Nova OS
+            <Plus className="icon-md" /> Nova OS
           </button>
           <ThemeToggle />
         </div>
@@ -185,7 +307,7 @@ export default function Dashboard() {
         <SectionHeader icon={FileText} title="Relatórios" accent="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
       {loadingOrders ? (
         <div className="flex items-center justify-center py-20 text-slate-400">
-          <Loader2 className="animate-spin mr-2" size={18} /> Carregando...
+          <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
         </div>
       ) : (
         <div className="space-y-4">
@@ -258,30 +380,119 @@ export default function Dashboard() {
         <SectionHeader
           icon={Wrench}
           title="Manutenção"
-          badge={!canManageOrders && statsManutencao.novas > 0 ? statsManutencao.novas : undefined}
+          // Só o Técnico de Manutenção tem OS "aguardando" — o Técnico LA só
+          // acompanha o que abriu, nada ali depende de uma ação dele.
+          badge={!isTecnicoLA && statsManutencao.naoIniciadas > 0 ? statsManutencao.naoIniciadas : undefined}
           accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
           action={
-            <button
-              onClick={() => navigate('/manutencao')}
-              className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
-            >
-              Ver dashboard completo <ArrowRight size={12} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportarManutencaoExcel}
+                disabled={exportandoManutencao}
+                title={filtrosManutencaoAtivos ? 'Exporta só as OS que passam pelos filtros aplicados' : 'Exporta todas as OS'}
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-60"
+              >
+                {exportandoManutencao ? <Loader2 className="icon-sm animate-spin" /> : <Sheet className="icon-sm" />} Excel
+              </button>
+              {/* Lista completa fica numa tela à parte — aqui é só o resumo do dia a dia. */}
+              <button
+                onClick={() => navigate('/manutencao/ordens')}
+                className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
+              >
+                Minhas Ordens <ArrowRight className="icon-sm" />
+              </button>
+            </div>
           }
         />
         {loadingManutencao ? (
           <div className="flex items-center justify-center py-14 text-slate-400">
-            <Loader2 className="animate-spin mr-2" size={18} /> Carregando...
+            <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard icon={ClipboardList} label="Abertas" value={statsManutencao.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
-            <StatCard icon={Clock} label="Em andamento" value={statsManutencao.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
-            <StatCard icon={ShieldAlert} label="Finalizadas (para aprovar)" value={statsManutencao.aguardandoAprovacao} accent="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
-            <StatCard icon={CheckCircle2} label="Concluídas" value={statsManutencao.concluidas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
+          <div className="space-y-4">
+            <FiltrosBar
+              filtros={filtrosManutencao}
+              setFiltro={setFiltroManutencao}
+              limpar={() => setFiltrosManutencao(FILTROS_DASHBOARD_VAZIOS)}
+              ativos={filtrosManutencaoAtivos}
+              tipos={tiposManutencaoDisponiveis}
+              tecnicos={[]}
+              cidades={cidadesManutencaoDisponiveis}
+              mostrarTecnico={false}
+            />
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard icon={ClipboardList} label="Abertas" value={statsManutencao.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
+              <StatCard icon={Clock} label="Em andamento" value={statsManutencao.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
+              <StatCard icon={ShieldAlert} label="Finalizadas" value={statsManutencao.finalizadas} accent="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
+              <StatCard icon={CheckCircle2} label="Concluídas" value={statsManutencao.concluidas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
+            </div>
+
+            <OrdensRecentes
+              orders={ordensManutencaoFiltradas}
+              navigate={navigate}
+              vazio="Nenhuma OS aberta ou delegada a você ainda."
+              isTecnicoManutencao={isTecnicoManutencao}
+            />
           </div>
         )}
       </section>
+
+      {isTecnicoManutencao && (
+        <section>
+          <SectionHeader
+            icon={RouteIcon}
+            title="Vistoria"
+            badge={statsVistoria.abertas > 0 ? statsVistoria.abertas : undefined}
+            accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+            action={
+              <button
+                onClick={() => navigate('/vistoria/ordens')}
+                className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
+              >
+                Minhas Rotas <ArrowRight className="icon-sm" />
+              </button>
+            }
+          />
+          {loadingVistoria ? (
+            <div className="flex items-center justify-center py-14 text-slate-400">
+              <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <StatCard icon={ClipboardList} label="Abertas" value={statsVistoria.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
+                <StatCard icon={Clock} label="Em andamento" value={statsVistoria.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
+                <StatCard icon={CheckCircle2} label="Concluídas" value={statsVistoria.concluidas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+                <h2 className="text-sm font-black text-slate-700 dark:text-slate-200 mb-4">Rotas recentes</h2>
+                <div className="space-y-2">
+                  {ordensVistoria.length === 0 && <p className="text-xs text-slate-400">Nenhuma rota de vistoria atribuída a você ainda.</p>}
+                  {ordensVistoria.slice(0, 6).map((o) => (
+                    <button
+                      key={o.id}
+                      onClick={() => navigate(`/vistoria/ordens/${o.id}/execucao`)}
+                      className="w-full flex items-center justify-between gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{o.numero} — {o.titulo}</p>
+                        <p className="text-[11px] text-slate-400 flex items-center gap-1 truncate">
+                          <MapPin size={10} /> {o.equipe || 'Sem equipe'} • {o.pendencias.length} pendência(s)
+                        </p>
+                      </div>
+                      <span className={cn('text-[10px] font-black px-2 py-1 rounded-full shrink-0', STATUS_VISTORIA_COLOR[o.status])}>
+                        {STATUS_VISTORIA_LABEL[o.status]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <NovaOSModal
         isOpen={showNovaOSModal}

@@ -4,21 +4,22 @@ import {
   Loader2, MapPin, LogIn, Route as RouteIcon, Flag, PlayCircle,
   PauseCircle, CheckCircle2, Circle, MinusCircle, AlertTriangle, Package,
   Camera, Video, ListChecks, X, User, Users, CalendarClock, StickyNote,
-  Navigation, ExternalLink, Trash2, Download, Images,
+  Navigation, ExternalLink, Trash2, Download, Images, Image as ImageIcon,
 } from 'lucide-react';
 import {
   getManutencaoOrder, updateOrderStatus, updateChecklistItem,
-  addOcorrencias, addMateriais, addFotoManutencao, addVideoManutencao,
+  adicionarObservacao, addMateriais, addFotoManutencao, addVideoManutencao,
   removeFotoManutencao,
 } from '@/lib/manutencaoService';
 import {
-  ManutencaoOrdem, StatusOS, PRIORIDADE_LABEL, EstadoChecklistItem, FotoOS, PROBLEMAS_CTO_GRUPOS,
+  ManutencaoOrdem, StatusOS, PRIORIDADE_LABEL, EstadoChecklistItem, FotoOS, deserializeProblemas,
 } from '@/types/manutencao';
 import { getSignedFotoManutencaoUrl } from '@/lib/supabaseClient';
 import { enqueueFoto, enqueueVideo, countPendentes, flushPendentes } from '@/lib/manutencaoOfflineQueue';
 import { BackButton } from '@/components/BackButton';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -55,16 +56,16 @@ const PROXIMA_ACAO: Partial<Record<StatusOS, { label: string; icon: any; proximo
 
 const MENSAGEM_SOMENTE_LEITURA: Partial<Record<StatusOS, string>> = {
   aberta: 'Aguardando um supervisor atribuir esta OS a uma equipe/técnico.',
-  aguardando_aprovacao: 'Atividade finalizada — em análise do gestor.',
+  finalizada: 'Atividade finalizada. Nada mais a fazer aqui — se for necessário retrabalho, o supervisor reabre a OS.',
   aprovada: 'OS aprovada pelo gestor. Nada mais a fazer aqui.',
   cancelada: 'Esta OS foi cancelada.',
   concluida: 'Esta OS já foi concluída.',
 };
 
 function ChecklistIcon({ estado }: { estado: EstadoChecklistItem }) {
-  if (estado === 'concluido') return <CheckCircle2 size={20} className="text-green-600" />;
-  if (estado === 'nao_aplica') return <MinusCircle size={20} className="text-slate-400" />;
-  return <Circle size={20} className="text-slate-300" />;
+  if (estado === 'concluido') return <CheckCircle2 className="icon-md text-green-600" />;
+  if (estado === 'nao_aplica') return <MinusCircle className="icon-md text-slate-400" />;
+  return <Circle className="icon-md text-slate-300" />;
 }
 
 function BigActionButton({
@@ -84,9 +85,65 @@ function BigActionButton({
       disabled={busy}
       className="w-full flex items-center justify-center gap-3 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-base font-black py-5 rounded-2xl shadow-sm transition-colors"
     >
-      {busy ? <Loader2 size={22} className="animate-spin" /> : <Icon size={22} />}
+      {busy ? <Loader2 className="icon-lg animate-spin" /> : <Icon className="icon-lg" />}
       {label}
     </button>
+  );
+}
+
+// Checkpoints da execução, em ordem — usados só pro indicador de progresso
+// (mesmo visual do stepper do wizard de abertura, NovaOrdemManutencao.tsx),
+// já que antes não havia nenhuma noção de "quanto falta" durante a execução.
+const ETAPAS_EXECUCAO: { status: StatusOS; label: string }[] = [
+  { status: 'recebida', label: 'Receber' },
+  { status: 'deslocamento', label: 'Deslocamento' },
+  { status: 'no_local', label: 'No local' },
+  { status: 'em_execucao', label: 'Execução' },
+  { status: 'finalizada', label: 'Finalizar' },
+];
+
+function StepperExecucao({ status }: { status: StatusOS }) {
+  // 'pausada' é um sub-estado de 'em_execucao' pro efeito do indicador;
+  // 'atribuida'/'reaberta' ainda não bateram nenhum checkpoint (índice -1).
+  const statusEfetivo = status === 'pausada' ? 'em_execucao' : status;
+  const indiceAtual = ETAPAS_EXECUCAO.findIndex((e) => e.status === statusEfetivo);
+
+  return (
+    <div className="flex items-center">
+      {ETAPAS_EXECUCAO.map((etapa, i) => (
+        <div key={etapa.status} className="flex items-center flex-1 last:flex-none">
+          <div className="flex flex-col items-center gap-1 shrink-0">
+            <div
+              className={cn(
+                'w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black shrink-0 transition-colors',
+                i === indiceAtual
+                  ? 'bg-amber-500 text-white'
+                  : i < indiceAtual
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                    : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500',
+              )}
+            >
+              {i < indiceAtual ? <CheckCircle2 size={14} /> : i + 1}
+            </div>
+            <span
+              className={cn(
+                'text-[9px] font-bold text-center leading-tight w-14',
+                i === indiceAtual
+                  ? 'text-slate-800 dark:text-slate-100'
+                  : i < indiceAtual
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : 'text-slate-500 dark:text-slate-400',
+              )}
+            >
+              {etapa.label}
+            </span>
+          </div>
+          {i < ETAPAS_EXECUCAO.length - 1 && (
+            <div className={cn('h-0.5 flex-1 mx-1 -mt-4', i < indiceAtual ? 'bg-amber-400' : 'bg-slate-200 dark:bg-slate-800')} />
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -97,7 +154,7 @@ function ToolButton({ icon: Icon, label, onClick }: { icon: any; label: string; 
       className="flex flex-col items-center justify-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl py-4 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
     >
       <div className="w-11 h-11 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-        <Icon size={20} />
+        <Icon className="icon-md" />
       </div>
       <span className="text-xs font-bold text-slate-700 dark:text-slate-200 text-center leading-tight">{label}</span>
     </button>
@@ -107,6 +164,7 @@ function ToolButton({ icon: Icon, label, onClick }: { icon: any; label: string; 
 export default function ManutencaoExecucaoMobile() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { profile, canManageOrders } = useAuth();
   const [ordem, setOrdem] = useState<ManutencaoOrdem | null>(null);
   const [loading, setLoading] = useState(true);
   const [avancando, setAvancando] = useState(false);
@@ -124,6 +182,7 @@ export default function ManutencaoExecucaoMobile() {
   const [excluindoFoto, setExcluindoFoto] = useState(false);
 
   const fotoInputRef = useRef<HTMLInputElement>(null);
+  const galeriaInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   const carregar = () => {
@@ -137,7 +196,7 @@ export default function ManutencaoExecucaoMobile() {
 
   useEffect(carregar, [id]);
 
-  // Todas as fotos da OS (antes/durante) — o técnico de manutenção pode ver
+  // Todas as fotos da OS (antes/depois) — o técnico de manutenção pode ver
   // qualquer uma a qualquer momento da tratativa, mesmo as que ele não tirou
   // (as "antes", tiradas pelo Técnico LA na abertura), só sem poder editá-las.
   useEffect(() => {
@@ -199,11 +258,11 @@ export default function ManutencaoExecucaoMobile() {
     }
   };
 
-  const handlePausar = async (motivo?: string) => {
+  const handlePausar = async (motivo: string) => {
     if (!ordem) return;
     setAvancando(true);
     try {
-      await updateOrderStatus(ordem.id, 'pausada', 'Execução pausada', motivo ? { descricao: motivo } : undefined);
+      await updateOrderStatus(ordem.id, 'pausada', 'Execução pausada', { descricao: motivo });
       carregar();
     } finally {
       setAvancando(false);
@@ -226,10 +285,10 @@ export default function ManutencaoExecucaoMobile() {
     setConfirmFinalizar(false);
     setAvancando(true);
     try {
-      await updateOrderStatus(ordem.id, 'aguardando_aprovacao', 'Execução finalizada', {
+      await updateOrderStatus(ordem.id, 'finalizada', 'Execução finalizada', {
         execucaoFimEm: new Date().toISOString(),
       });
-      toast({ title: 'OS finalizada', description: 'Enviada para aprovação do gestor.' });
+      toast({ title: 'OS finalizada' });
       navigate('/manutencao/ordens');
     } catch (err) {
       console.error('[Manutencao] Erro ao finalizar OS:', err);
@@ -260,12 +319,12 @@ export default function ManutencaoExecucaoMobile() {
     const dataUrl = await normalizeImage(file);
     try {
       if (!navigator.onLine) throw new Error('offline');
-      await addFotoManutencao(ordem.id, dataUrl, 'durante');
+      await addFotoManutencao(ordem.id, dataUrl, 'depois');
       toast({ title: 'Foto anexada' });
       carregar();
     } catch (err) {
       if (!navigator.onLine) {
-        await enqueueFoto(ordem.id, dataUrl, 'durante');
+        await enqueueFoto(ordem.id, dataUrl, 'depois');
         toast({ title: 'Sem conexão', description: 'Foto salva no aparelho — será enviada quando a conexão voltar.' });
         atualizarPendentes();
       } else {
@@ -275,10 +334,11 @@ export default function ManutencaoExecucaoMobile() {
     } finally {
       setEnviandoMidia(null);
       if (fotoInputRef.current) fotoInputRef.current.value = '';
+      if (galeriaInputRef.current) galeriaInputRef.current.value = '';
     }
   };
 
-  // Remoção só se aplica às fotos "durante" (as que o próprio técnico de
+  // Remoção só se aplica às fotos "depois" (as que o próprio técnico de
   // manutenção tirou em campo) — as "antes" ficam disponíveis só pra visualização.
   const handleExcluirFoto = async () => {
     if (!paraExcluirFoto || !ordem) return;
@@ -322,7 +382,7 @@ export default function ManutencaoExecucaoMobile() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-slate-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Carregando...
+        <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
       </div>
     );
   }
@@ -333,6 +393,24 @@ export default function ManutencaoExecucaoMobile() {
         <div>
           <p className="font-bold text-slate-700 dark:text-slate-200">OS não encontrada</p>
           <button onClick={() => navigate('/manutencao/ordens')} className="text-sm font-bold text-amber-600 hover:underline mt-2">
+            Voltar para a lista
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Esta tela é de execução — só quem foi delegado pode agir aqui. O Técnico
+  // LA (que abriu a OS) continua enxergando-a via RLS mesmo depois de
+  // delegada, mas não tem nada a fazer nesta tela; sem essa checagem, ele
+  // conseguia entrar na execução de um técnico de manutenção diferente.
+  if (!canManageOrders && ordem.tecnicoId && ordem.tecnicoId !== profile?.id) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 text-center">
+        <div>
+          <p className="font-bold text-slate-700 dark:text-slate-200">Esta OS não é sua</p>
+          <p className="text-sm text-slate-400 mt-1">Ela foi delegada a outro técnico de manutenção.</p>
+          <button onClick={() => navigate('/manutencao/ordens')} className="text-sm font-bold text-amber-600 hover:underline mt-3">
             Voltar para a lista
           </button>
         </div>
@@ -368,31 +446,39 @@ export default function ManutencaoExecucaoMobile() {
             {ordem.endereco ? `${ordem.endereco}${ordem.numeroEndereco ? `, ${ordem.numeroEndereco}` : ''} — ` : ''}
             {ordem.bairro ? `${ordem.bairro}, ` : ''}{ordem.municipio || 'Endereço não informado'}
             {ordem.referencia && (
-              <span className="block text-xs text-slate-400 mt-0.5">Ponto de referência: {ordem.referencia}</span>
+              <span className="block text-xs text-slate-600 dark:text-slate-300 mt-0.5">Ponto de referência: {ordem.referencia}</span>
             )}
           </span>
         </div>
 
-        <p className="text-sm text-slate-500">{ordem.problemaInformado || 'Sem descrição do problema.'}</p>
+        {ordem.problemaInformado ? (
+          <ul className="text-sm font-medium text-slate-700 dark:text-slate-200 list-disc list-inside space-y-0.5">
+            {deserializeProblemas(ordem.problemaInformado).map((problema, i) => (
+              <li key={i}>{problema}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Sem descrição do problema.</p>
+        )}
 
         {ordem.observacoes && (
-          <p className="text-sm text-slate-500 flex items-start gap-1.5">
+          <p className="text-sm text-slate-700 dark:text-slate-200 flex items-start gap-1.5">
             <StickyNote size={14} className="mt-0.5 shrink-0 text-slate-400" />
             {ordem.observacoes}
           </p>
         )}
 
         <div className="grid grid-cols-2 gap-x-3 gap-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-1.5 text-xs text-slate-500 col-span-2">
+          <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 col-span-2">
             <User size={13} className="shrink-0 text-slate-400" /> {ordem.solicitante || 'Sem solicitante'}
           </div>
           {ordem.equipe && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 col-span-2">
+            <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 col-span-2">
               <Users size={13} className="shrink-0 text-slate-400" /> {ordem.equipe}
             </div>
           )}
           {(ordem.dataPrevista || ordem.horarioPrevisto) && (
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 col-span-2">
+            <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 col-span-2">
               <CalendarClock size={13} className="shrink-0 text-slate-400" />
               {ordem.dataPrevista ? new Date(`${ordem.dataPrevista}T00:00:00`).toLocaleDateString('pt-BR') : ''}
               {ordem.horarioPrevisto ? ` às ${ordem.horarioPrevisto}` : ''}
@@ -402,7 +488,7 @@ export default function ManutencaoExecucaoMobile() {
 
         {ordem.fotos.some((f) => f.categoria === 'antes') && (
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-            <p className="text-[11px] font-black uppercase tracking-wide text-slate-400 mb-2">Fotos do problema (antes)</p>
+            <p className="text-[11px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 mb-2">Fotos do problema (antes)</p>
             <div className="flex gap-2 overflow-x-auto">
               {ordem.fotos.filter((f) => f.categoria === 'antes').map((f) => (
                 fotoUrls[f.id] ? (
@@ -429,6 +515,12 @@ export default function ManutencaoExecucaoMobile() {
         )}
       </div>
 
+      {['atribuida', 'reaberta', 'recebida', 'deslocamento', 'no_local', 'em_execucao', 'pausada'].includes(ordem.status) && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+          <StepperExecucao status={ordem.status} />
+        </div>
+      )}
+
       {ordem.status === 'reaberta' && ordem.motivoRecusa && (
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/50 rounded-2xl p-4">
           <p className="text-xs font-black uppercase tracking-wide text-amber-700 dark:text-amber-400 mb-1">Observação do retrabalho</p>
@@ -436,10 +528,13 @@ export default function ManutencaoExecucaoMobile() {
         </div>
       )}
 
-      {/* Recebida e ainda não em deslocamento — mostra o mapa pra chegar no local. */}
-      {ordem.status === 'recebida' && (
+      {/* Recebida ou já em deslocamento — mostra o mapa e as coordenadas de
+          abertura pra chegar no local. Antes sumia assim que o técnico
+          clicava "Iniciar Deslocamento", justamente quando mais precisa
+          disso (a caminho, ainda sem ter chegado). */}
+      {['recebida', 'deslocamento'].includes(ordem.status) && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
-          <h2 className="text-xs font-black uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+          <h2 className="text-xs font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
             <Navigation size={13} /> Como chegar
           </h2>
           {ordem.latitude != null && ordem.longitude != null ? (
@@ -452,7 +547,7 @@ export default function ManutencaoExecucaoMobile() {
                 />
               </div>
               <div className="text-xs">
-                <p className="text-slate-400 font-bold uppercase text-[10px]">Coordenadas (UTM)</p>
+                <p className="text-slate-600 dark:text-slate-300 font-bold uppercase text-[10px]">Coordenadas (GPS)</p>
                 <p className="font-mono font-semibold text-slate-700 dark:text-slate-200">
                   {ordem.latitude.toFixed(6)}, {ordem.longitude.toFixed(6)}
                 </p>
@@ -467,7 +562,7 @@ export default function ManutencaoExecucaoMobile() {
               </a>
             </>
           ) : (
-            <p className="text-sm text-slate-400">Nenhuma coordenada registrada para esta OS.</p>
+            <p className="text-sm text-slate-600 dark:text-slate-300">Nenhuma coordenada registrada para esta OS.</p>
           )}
         </div>
       )}
@@ -515,6 +610,11 @@ export default function ManutencaoExecucaoMobile() {
               onClick={() => fotoInputRef.current?.click()}
             />
             <ToolButton
+              icon={enviandoMidia === 'foto' ? Loader2 : ImageIcon}
+              label="Galeria"
+              onClick={() => galeriaInputRef.current?.click()}
+            />
+            <ToolButton
               icon={enviandoMidia === 'video' ? Loader2 : Video}
               label="Gravar Vídeo"
               onClick={() => videoInputRef.current?.click()}
@@ -523,13 +623,13 @@ export default function ManutencaoExecucaoMobile() {
           </div>
 
           {/* Fotos tiradas durante a execução — o técnico de manutenção pode ver e remover as que tirou aqui. */}
-          {ordem.fotos.some((f) => f.categoria === 'durante') && (
+          {ordem.fotos.some((f) => f.categoria === 'depois') && (
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-2">
-              <p className="text-[11px] font-black uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+              <p className="text-[11px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
                 <Images size={13} /> Fotos desta execução
               </p>
               <div className="grid grid-cols-4 gap-2">
-                {ordem.fotos.filter((f) => f.categoria === 'durante').map((f) => (
+                {ordem.fotos.filter((f) => f.categoria === 'depois').map((f) => (
                   <div key={f.id} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800">
                     {fotoUrls[f.id] ? (
                       <button type="button" onClick={() => setAmpliada(f)} className="w-full h-full">
@@ -543,9 +643,9 @@ export default function ManutencaoExecucaoMobile() {
                     <button
                       onClick={() => setParaExcluirFoto(f)}
                       className="absolute top-1 right-1 w-6 h-6 rounded-md bg-black/60 text-white flex items-center justify-center"
-                      aria-label="Remover foto"
+                      aria-label="Excluir foto"
                     >
-                      <Trash2 size={12} />
+                      <Trash2 className="icon-sm" />
                     </button>
                   </div>
                 ))}
@@ -557,12 +657,20 @@ export default function ManutencaoExecucaoMobile() {
         </>
       )}
 
-      {/* Inputs ocultos de câmera */}
+      {/* Inputs ocultos de câmera/galeria — sem `capture`, o navegador deixa
+          escolher da galeria em vez de forçar a câmera. */}
       <input
         ref={fotoInputRef}
         type="file"
         accept="image/*"
         capture="environment"
+        className="hidden"
+        onChange={(e) => handleFotoSelected(e.target.files?.[0])}
+      />
+      <input
+        ref={galeriaInputRef}
+        type="file"
+        accept="image/*"
         className="hidden"
         onChange={(e) => handleFotoSelected(e.target.files?.[0])}
       />
@@ -626,11 +734,11 @@ export default function ManutencaoExecucaoMobile() {
       )}
 
       {/* Visualização ampliada — vale tanto pras fotos "antes" (só visualização)
-          quanto pras "durante" (remoção fica no botão da miniatura, não aqui). */}
+          quanto pras "depois" (remoção fica no botão da miniatura, não aqui). */}
       {ampliada && fotoUrls[ampliada.id] && (
         <div className="fixed inset-0 z-[1000] bg-black/80 flex items-center justify-center p-4" onClick={() => setAmpliada(null)}>
           <button onClick={() => setAmpliada(null)} className="absolute top-4 right-4 text-white/80 hover:text-white" aria-label="Fechar">
-            <X size={28} />
+            <X className="icon-lg" />
           </button>
           <img
             src={fotoUrls[ampliada.id]}
@@ -651,9 +759,9 @@ export default function ManutencaoExecucaoMobile() {
 
       <ConfirmDialog
         isOpen={!!paraExcluirFoto}
-        title="Remover foto?"
+        title="Excluir foto?"
         description="Essa ação não pode ser desfeita."
-        confirmLabel={excluindoFoto ? 'Removendo...' : 'Remover'}
+        confirmLabel={excluindoFoto ? 'Excluindo...' : 'Excluir'}
         onConfirm={handleExcluirFoto}
         onCancel={() => setParaExcluirFoto(null)}
       />
@@ -672,7 +780,7 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
         <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-900">
           <h2 className="text-base font-black text-slate-800 dark:text-slate-100">{title}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Fechar">
-            <X size={20} />
+            <X className="icon-md" />
           </button>
         </div>
         <div className="p-5 space-y-4">{children}</div>
@@ -709,7 +817,7 @@ function ChecklistModal({
             </span>
           </button>
         ))}
-        <p className="text-[11px] text-slate-400 pt-2">Toque no item para alternar: pendente → concluído → não se aplica.</p>
+        <p className="text-[11px] text-slate-600 dark:text-slate-300 pt-2">Toque no item para alternar: pendente → concluído → não se aplica.</p>
       </div>
     </ModalShell>
   );
@@ -726,29 +834,22 @@ function OcorrenciaModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [selecionados, setSelecionados] = useState<string[]>([]);
   const [observacao, setObservacao] = useState('');
   const [salvando, setSalvando] = useState(false);
 
-  const toggleProblema = (item: string) => {
-    setSelecionados((prev) => (prev.includes(item) ? prev.filter((p) => p !== item) : [...prev, item]));
-  };
-
+  // Durante a execução essa tela é só consulta (o que já foi contabilizado
+  // na abertura/ocorrências anteriores) + uma nota livre — marcar novos
+  // problemas do checklist deixou de ser feito por aqui.
   const handleSalvar = async () => {
-    if (selecionados.length === 0) return;
+    if (!observacao.trim()) return;
     setSalvando(true);
     try {
-      const { novosItensChecklist } = await addOcorrencias(ordemId, selecionados, observacao || undefined);
-      const titulo = selecionados.length === 1 ? 'Ocorrência registrada' : `${selecionados.length} ocorrências registradas`;
-      toast({
-        title: titulo,
-        description: novosItensChecklist > 0
-          ? `${novosItensChecklist} item(ns) adicionado(s) ao checklist.`
-          : undefined,
-      });
+      await adicionarObservacao(ordemId, observacao.trim());
+      toast({ title: 'Observação registrada' });
+      setObservacao('');
       onSaved();
     } catch (err) {
-      console.error('[Manutencao] Erro ao registrar ocorrência:', err);
+      console.error('[Manutencao] Erro ao registrar observação:', err);
       toast({ title: 'Não foi possível registrar', description: err instanceof Error ? err.message : undefined, variant: 'destructive' });
     } finally {
       setSalvando(false);
@@ -757,92 +858,46 @@ function OcorrenciaModal({
 
   return (
     <ModalShell title="Ocorrências" onClose={onClose}>
-      {/* Ocorrências já registradas — inclusive as marcadas na abertura da OS
-          pelo Técnico LA, que continuam visíveis aqui pro técnico de
-          manutenção, só não dá pra editar/remover (fica só como histórico). */}
-      {ocorrencias.length > 0 && (
-        <div>
-          <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5 block">
-            Já registradas
-          </label>
-          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+      {/* Ocorrências já registradas — na abertura pelo Técnico LA ou em
+          ocorrências anteriores. Só consulta aqui; não dá pra editar/remover. */}
+      <div>
+        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
+          Já registradas
+        </label>
+        {ocorrencias.length === 0 ? (
+          <p className="text-sm text-slate-600 dark:text-slate-300">Nenhuma ocorrência registrada até agora.</p>
+        ) : (
+          <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
             {ocorrencias.map((o) => (
               <div key={o.id} className="flex items-start gap-2 p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/60">
                 <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{o.tipo}</p>
-                  {o.observacao && <p className="text-xs text-slate-400">{o.observacao}</p>}
+                  {o.observacao && <p className="text-xs text-slate-600 dark:text-slate-300">{o.observacao}</p>}
                 </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Mesma caixa de checklist da abertura da OS (PROBLEMAS_CTO) — cada
-          problema marcado vira uma ocorrência E um item a resolver no
-          checklist de atividades. */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-            Nova ocorrência <span className="text-red-500">*</span>
-          </label>
-          <span className={cn(
-            'text-[10px] font-black px-1.5 py-0.5 rounded-full',
-            selecionados.length === 0
-              ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
-              : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
-          )}>
-            {selecionados.length > 0
-              ? `${selecionados.length} marcado${selecionados.length > 1 ? 's' : ''}`
-              : 'nenhum marcado'}
-          </span>
-        </div>
-        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-          {PROBLEMAS_CTO_GRUPOS.map((grupo) => (
-            <div key={grupo.grupo}>
-              <p className="text-[10px] font-black uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1">
-                {grupo.grupo}
-              </p>
-              <div className="space-y-2">
-                {grupo.itens.map((item, i) => (
-                  <label
-                    key={i}
-                    htmlFor={`ocorrencia-problema-${grupo.grupo}-${i}`}
-                    className="flex items-start gap-2.5 cursor-pointer select-none"
-                  >
-                    <input
-                      id={`ocorrencia-problema-${grupo.grupo}-${i}`}
-                      type="checkbox"
-                      checked={selecionados.includes(item)}
-                      onChange={() => toggleProblema(item)}
-                      className="mt-0.5 h-4 w-4 text-amber-500 border-slate-300 rounded focus:ring-amber-500"
-                    />
-                    <span className="text-sm text-slate-700 dark:text-slate-200 leading-tight">{item}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        )}
       </div>
 
       <div>
-        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 block">Observação (opcional)</label>
+        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">Observação (opcional)</label>
         <textarea
           value={observacao}
           onChange={(e) => setObservacao(e.target.value)}
-          rows={2}
+          rows={3}
+          placeholder="Alguma nota sobre o serviço, se for necessário..."
           className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 resize-none"
         />
       </div>
 
       <button
         onClick={handleSalvar}
-        disabled={salvando || selecionados.length === 0}
+        disabled={salvando || !observacao.trim()}
         className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition-colors"
       >
-        {salvando ? <Loader2 size={16} className="animate-spin" /> : 'Salvar Ocorrência'}
+        {salvando ? <Loader2 size={16} className="animate-spin" /> : 'Salvar Observação'}
       </button>
     </ModalShell>
   );
@@ -899,7 +954,7 @@ function MaterialModal({ ordemId, onClose, onSaved }: { ordemId: string; onClose
         {linhas.map((linha, index) => (
           <div key={index} className="space-y-2.5 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">Item {index + 1}</span>
+              <span className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400">Item {index + 1}</span>
               {linhas.length > 1 && (
                 <button onClick={() => removerLinha(index)} className="text-slate-400 hover:text-red-500" aria-label="Remover item">
                   <X size={14} />
@@ -962,26 +1017,42 @@ function PausarModal({
 }: {
   busy: boolean;
   onClose: () => void;
-  onConfirmar: (motivo?: string) => void;
+  onConfirmar: (motivo: string) => void;
 }) {
   const [motivo, setMotivo] = useState('');
+  const [tentouEnviar, setTentouEnviar] = useState(false);
+  const motivoValido = motivo.trim().length > 0;
 
   return (
     <ModalShell title="Pausar Execução" onClose={onClose}>
       <div>
-        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 block">
-          Motivo da pausa (opcional)
+        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
+          Motivo da pausa
         </label>
         <textarea
           value={motivo}
           onChange={(e) => setMotivo(e.target.value)}
           rows={2}
           placeholder="Ex: aguardando material, cliente ausente, fim de expediente..."
-          className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 resize-none"
+          className={cn(
+            'w-full px-3 py-2.5 text-sm rounded-xl border bg-white dark:bg-slate-800 resize-none',
+            tentouEnviar && !motivoValido
+              ? 'border-red-400 dark:border-red-500'
+              : 'border-slate-200 dark:border-slate-700'
+          )}
         />
+        {tentouEnviar && !motivoValido && (
+          <p className="text-xs text-red-500 mt-1">Explique o motivo para pausar a execução.</p>
+        )}
       </div>
       <button
-        onClick={() => onConfirmar(motivo.trim() || undefined)}
+        onClick={() => {
+          if (!motivoValido) {
+            setTentouEnviar(true);
+            return;
+          }
+          onConfirmar(motivo.trim());
+        }}
         disabled={busy}
         className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition-colors"
       >

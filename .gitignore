@@ -34,3 +34,6 @@ dist-ssr
 .env.*
 !.env.example
 .claude/
+
+# Cache local da CLI do Supabase — nao e fonte
+supabase/.temp/

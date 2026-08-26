@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Loader2, CheckCircle2, Circle, MinusCircle, Camera, Video, MapPinned,
-  Upload, Trash2, Download, X, Play, ExternalLink, ThumbsUp, RotateCcw,
-  Ban, MessageSquareWarning,
+  Upload, Trash2, Download, X, Play, ExternalLink, RotateCcw,
+  Ban, Lock, CheckCheck, FileDown, Eye, Pencil, Link2,
 } from 'lucide-react';
+import { saveAs } from 'file-saver';
 import {
   getManutencaoOrder,
   updateChecklistItem,
@@ -12,15 +13,16 @@ import {
   removeFotoManutencao,
   addVideoManutencao,
   removeVideoManutencao,
-  aprovarOrdem,
-  solicitarCorrecao,
   reabrirOrdem,
   cancelarOrdem,
+  encerrarOrdem,
+  atualizarReferenciaExterna,
 } from '@/lib/manutencaoService';
+import { exportManutencaoPdf } from '@/lib/manutencaoPdfEngine';
 import { getSignedFotoManutencaoUrl, getSignedVideoManutencaoUrl } from '@/lib/supabaseClient';
 import {
   ManutencaoOrdem, STATUS_LABEL, PRIORIDADE_LABEL, EstadoChecklistItem,
-  CategoriaFotoOS, FotoOS, VideoOS,
+  CategoriaFotoOS, FotoOS, VideoOS, deserializeProblemas,
 } from '@/types/manutencao';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
@@ -32,23 +34,26 @@ import { cn } from '@/lib/utils';
 
 type Aba = 'resumo' | 'execucao' | 'ocorrencias' | 'materiais' | 'checklist' | 'fotos' | 'videos' | 'localizacao' | 'aprovacao' | 'historico';
 
-const ABAS: { key: Aba; label: string; icon?: any }[] = [
-  { key: 'resumo', label: 'Resumo' },
-  { key: 'execucao', label: 'Execução' },
-  { key: 'ocorrencias', label: 'Ocorrências' },
-  { key: 'materiais', label: 'Materiais' },
+// `readOnly` marca abas que só exibem informação (nada aqui pode ser mudado
+// pelo gestor/supervisor) — sem essa marcação, a única forma de descobrir
+// que "Execução"/"Ocorrências"/etc. não fazem nada era clicar em cada uma.
+const ABAS: { key: Aba; label: string; icon?: any; readOnly?: boolean }[] = [
+  { key: 'resumo', label: 'Resumo', readOnly: true },
+  { key: 'execucao', label: 'Execução', readOnly: true },
+  { key: 'ocorrencias', label: 'Ocorrências', readOnly: true },
+  { key: 'materiais', label: 'Materiais', readOnly: true },
   { key: 'checklist', label: 'Checklist' },
   { key: 'fotos', label: 'Fotos', icon: Camera },
   { key: 'videos', label: 'Vídeos', icon: Video },
-  { key: 'localizacao', label: 'Localização', icon: MapPinned },
-  { key: 'aprovacao', label: 'Aprovação' },
-  { key: 'historico', label: 'Histórico' },
+  { key: 'localizacao', label: 'Localização', icon: MapPinned, readOnly: true },
+  { key: 'aprovacao', label: 'Encerramento' },
+  { key: 'historico', label: 'Histórico', readOnly: true },
 ];
 
 function ChecklistIcon({ estado }: { estado: EstadoChecklistItem }) {
-  if (estado === 'concluido') return <CheckCircle2 size={18} className="text-green-600" />;
-  if (estado === 'nao_aplica') return <MinusCircle size={18} className="text-slate-400" />;
-  return <Circle size={18} className="text-slate-300" />;
+  if (estado === 'concluido') return <CheckCircle2 className="icon-md text-green-600" />;
+  if (estado === 'nao_aplica') return <MinusCircle className="icon-md text-slate-400" />;
+  return <Circle className="icon-md text-slate-300" />;
 }
 
 // ── Aba Fotos ────────────────────────────────────────────────────────────
@@ -56,7 +61,6 @@ function ChecklistIcon({ estado }: { estado: EstadoChecklistItem }) {
 const CATEGORIAS_FOTO: { key: CategoriaFotoOS | 'todas'; label: string }[] = [
   { key: 'todas', label: 'Todas' },
   { key: 'antes', label: 'Antes' },
-  { key: 'durante', label: 'Durante' },
   { key: 'depois', label: 'Depois' },
 ];
 
@@ -82,7 +86,7 @@ function normalizeImage(file: File): Promise<string> {
 }
 
 function AbaFotos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: () => void }) {
-  const [categoria, setCategoria] = useState<CategoriaFotoOS>('durante');
+  const [categoria, setCategoria] = useState<CategoriaFotoOS>('depois');
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [enviando, setEnviando] = useState(false);
   const [ampliada, setAmpliada] = useState<FotoOS | null>(null);
@@ -155,7 +159,7 @@ function AbaFotos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: () 
           disabled={enviando}
           className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors"
         >
-          {enviando ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+          {enviando ? <Loader2 className="icon-sm animate-spin" /> : <Upload className="icon-sm" />}
           Enviar foto{categoria ? ` (${categoria})` : ''}
         </button>
         <input
@@ -182,14 +186,14 @@ function AbaFotos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: () 
                   onClick={() => setAmpliada(f)}
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center"><Loader2 size={18} className="animate-spin text-slate-400" /></div>
+                <div className="w-full h-full flex items-center justify-center"><Loader2 className="icon-md animate-spin text-slate-400" /></div>
               )}
               <button
                 onClick={() => setParaExcluir(f)}
                 className="absolute top-1.5 right-1.5 w-7 h-7 rounded-lg bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 aria-label="Excluir foto"
               >
-                <Trash2 size={13} />
+                <Trash2 className="icon-sm" />
               </button>
             </div>
           ))}
@@ -199,7 +203,7 @@ function AbaFotos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: () 
       {ampliada && urls[ampliada.id] && (
         <div className="fixed inset-0 z-[1000] bg-black/80 flex items-center justify-center p-4" onClick={() => setAmpliada(null)}>
           <button onClick={() => setAmpliada(null)} className="absolute top-4 right-4 text-white/80 hover:text-white" aria-label="Fechar">
-            <X size={28} />
+            <X className="icon-lg" />
           </button>
           <img src={urls[ampliada.id]} alt="" className="max-w-full max-h-[85vh] rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
           <a
@@ -208,7 +212,7 @@ function AbaFotos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: () 
             onClick={(e) => e.stopPropagation()}
             className="absolute bottom-4 flex items-center gap-2 bg-white/90 text-slate-800 text-sm font-bold px-4 py-2 rounded-xl"
           >
-            <Download size={14} /> Baixar
+            <Download className="icon-sm" /> Baixar
           </a>
         </div>
       )}
@@ -281,7 +285,7 @@ function AbaVideos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: ()
           disabled={enviando}
           className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors"
         >
-          {enviando ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+          {enviando ? <Loader2 className="icon-sm animate-spin" /> : <Upload className="icon-sm" />}
           Enviar vídeo
         </button>
         <input ref={fileInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
@@ -294,7 +298,7 @@ function AbaVideos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: ()
           {ordem.videos.map((v) => (
             <div key={v.id} className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 aspect-video bg-slate-900 flex items-center justify-center">
               <button onClick={() => setTocando(v)} className="text-white/90 hover:text-white flex flex-col items-center gap-1">
-                <Play size={28} />
+                <Play className="icon-lg" />
                 <span className="text-[10px] font-bold">Reproduzir</span>
               </button>
               <button
@@ -302,7 +306,7 @@ function AbaVideos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: ()
                 className="absolute top-1.5 right-1.5 w-7 h-7 rounded-lg bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 aria-label="Excluir vídeo"
               >
-                <Trash2 size={13} />
+                <Trash2 className="icon-sm" />
               </button>
             </div>
           ))}
@@ -312,7 +316,7 @@ function AbaVideos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: ()
       {tocando && urls[tocando.id] && (
         <div className="fixed inset-0 z-[1000] bg-black/80 flex items-center justify-center p-4" onClick={() => setTocando(null)}>
           <button onClick={() => setTocando(null)} className="absolute top-4 right-4 text-white/80 hover:text-white" aria-label="Fechar">
-            <X size={28} />
+            <X className="icon-lg" />
           </button>
           <video src={urls[tocando.id]} controls autoPlay className="max-w-full max-h-[85vh] rounded-lg" onClick={(e) => e.stopPropagation()} />
         </div>
@@ -355,7 +359,7 @@ function AbaLocalizacao({ ordem }: { ordem: ManutencaoOrdem }) {
             rel="noreferrer"
             className="inline-flex items-center gap-2 text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline"
           >
-            <ExternalLink size={14} /> Abrir no Google Maps
+            <ExternalLink className="icon-sm" /> Abrir no Google Maps
           </a>
         </>
       ) : (
@@ -378,10 +382,73 @@ function tempoExecucao(ordem: ManutencaoOrdem): string {
 }
 
 function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: () => void }) {
-  const { isGestor } = useAuth();
-  const [acao, setAcao] = useState<'aprovar' | 'corrigir' | 'reabrir' | 'cancelar' | null>(null);
+  const { canManageOrders, isTecnicoLA, profile } = useAuth();
+  // Só a página de detalhe já filtra por RLS quem chega até aqui (o
+  // Técnico LA só consegue carregar uma OS que ele mesmo abriu); esta
+  // segunda checagem é só pra decidir o que MOSTRAR na aba, não segurança.
+  const souDono = isTecnicoLA && ordem.responsavelId === profile?.id;
+  const podeVerResumo = canManageOrders || souDono;
+  const [acao, setAcao] = useState<'reabrir' | 'cancelar' | 'encerrar' | null>(null);
   const [motivo, setMotivo] = useState('');
   const [processando, setProcessando] = useState(false);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
+  // Guarda o blob + a blob URL do PDF já gerado — o botão de download só
+  // aparece depois que o gestor viu a pré-visualização, não junto com o
+  // botão que gera o PDF.
+  const [pdfPreview, setPdfPreview] = useState<{ blob: Blob; url: string } | null>(null);
+
+  // Referência manual pro app "Aniel" (ponte até existir integração via API)
+  // — editável a qualquer momento aqui, não só na delegação.
+  const [editandoRef, setEditandoRef] = useState(false);
+  const [refValor, setRefValor] = useState(ordem.referenciaExterna ?? '');
+  const [salvandoRef, setSalvandoRef] = useState(false);
+
+  useEffect(() => {
+    setRefValor(ordem.referenciaExterna ?? '');
+    setEditandoRef(false);
+  }, [ordem.id, ordem.referenciaExterna]);
+
+  const handleSalvarRef = async () => {
+    setSalvandoRef(true);
+    try {
+      await atualizarReferenciaExterna(ordem.id, refValor.trim() || null);
+      toast({ title: 'Referência atualizada' });
+      setEditandoRef(false);
+      onChanged();
+    } catch (err) {
+      console.error('[Manutencao] Erro ao salvar referência externa:', err);
+      toast({ title: 'Não foi possível salvar', variant: 'destructive' });
+    } finally {
+      setSalvandoRef(false);
+    }
+  };
+
+  // Revoga a blob URL anterior sempre que `pdfPreview` muda (nova geração,
+  // fechar a prévia) ou a aba desmonta — a closure do cleanup sempre vê o
+  // valor de ANTES da mudança, então basta isso pra nunca vazar memória
+  // segurando um PDF gerado que ninguém mais referencia.
+  useEffect(() => () => {
+    if (pdfPreview) URL.revokeObjectURL(pdfPreview.url);
+  }, [pdfPreview]);
+
+  const handleVisualizarPdf = async () => {
+    setGerandoPdf(true);
+    try {
+      const blob = await exportManutencaoPdf(ordem, { returnBlob: true });
+      if (!blob) throw new Error('PDF vazio');
+      setPdfPreview({ blob, url: URL.createObjectURL(blob) });
+    } catch (err) {
+      console.error('[Manutencao] Erro ao gerar PDF:', err);
+      toast({ title: 'Não foi possível gerar o PDF', description: err instanceof Error ? err.message : undefined, variant: 'destructive' });
+    } finally {
+      setGerandoPdf(false);
+    }
+  };
+
+  const handleBaixarPdf = () => {
+    if (!pdfPreview) return;
+    saveAs(pdfPreview.blob, `${ordem.numero}.pdf`);
+  };
 
   // "Não se aplica" é uma resolução legítima do item (o técnico avaliou e
   // descartou), não uma pendência — contar só 'concluido' fazia o resumo
@@ -400,22 +467,19 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
   const handleConfirmar = async () => {
     setProcessando(true);
     try {
-      if (acao === 'aprovar') {
-        await aprovarOrdem(ordem.id);
-        toast({ title: 'OS aprovada' });
-      } else if (acao === 'corrigir') {
-        await solicitarCorrecao(ordem.id, motivo || undefined);
-        toast({ title: 'Enviada para retrabalho' });
-      } else if (acao === 'reabrir') {
+      if (acao === 'reabrir') {
         await reabrirOrdem(ordem.id, motivo || undefined);
         toast({ title: 'OS reaberta' });
       } else if (acao === 'cancelar') {
         await cancelarOrdem(ordem.id, motivo);
         toast({ title: 'OS cancelada' });
+      } else if (acao === 'encerrar') {
+        await encerrarOrdem(ordem.id);
+        toast({ title: 'OS encerrada definitivamente' });
       }
       onChanged();
     } catch (err) {
-      console.error('[Manutencao] Erro na ação de aprovação:', err);
+      console.error('[Manutencao] Erro na ação de encerramento:', err);
       toast({ title: 'Não foi possível concluir', description: err instanceof Error ? err.message : undefined, variant: 'destructive' });
     } finally {
       setProcessando(false);
@@ -424,19 +488,64 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
     }
   };
 
-  if (!isGestor) {
-    return <p className="text-sm text-slate-400 py-8 text-center">Somente o gestor pode aprovar, cancelar ou reabrir uma OS.</p>;
+  // Quem não é gestor/supervisor nem o Técnico LA dono da OS não tem nada
+  // pra ver aqui — nem o resumo, já que ele só existiria pra alguém que
+  // nem deveria ter chegado nesta aba (RLS já bloqueou o carregamento da
+  // OS inteira antes disso pra qualquer outro caso).
+  if (!podeVerResumo) {
+    return <p className="text-sm text-slate-400 py-8 text-center">Você não tem acesso a esta aba.</p>;
   }
 
-  // Retrabalho e reabertura aceitam uma observação adicional, mas ela é
-  // opcional — o conteúdo já registrado na OS (ocorrências, materiais,
-  // checklist, fotos) se mantém do jeito que está. Só cancelamento exige
-  // motivo, por auditoria.
-  const mostraMotivo = acao === 'corrigir' || acao === 'reabrir' || acao === 'cancelar';
+  // Motivo é opcional na reabertura (o técnico só recebe de volta pra
+  // retrabalho, nada do que já foi registrado é apagado) e obrigatório no
+  // cancelamento, por auditoria. Encerramento definitivo não pede motivo —
+  // é só um carimbo de revisão, não uma devolução com justificativa.
   const motivoObrigatorio = acao === 'cancelar';
 
   return (
     <div className="space-y-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        {/* Finalizar não depende mais de aprovação manual — o técnico já marca
+            a OS como concluída sozinho. O que resta aqui é só a intervenção do
+            supervisor quando precisa: encerrar definitivamente, reabrir pra
+            retrabalho, ou cancelar. */}
+        <h2 className="text-sm font-black text-slate-700 dark:text-slate-200">Resumo do serviço</h2>
+        <button
+          onClick={handleVisualizarPdf}
+          disabled={gerandoPdf}
+          className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60 text-xs font-bold px-3 py-2 rounded-lg transition-colors"
+        >
+          {gerandoPdf ? <Loader2 className="icon-sm animate-spin" /> : <Eye className="icon-sm" />}
+          {pdfPreview ? 'Gerar novamente' : 'Visualizar PDF'}
+        </button>
+      </div>
+
+      {/* Só oferece o download depois que o gestor viu o resultado — evita
+          baixar um PDF sem saber o que tem dentro. */}
+      {pdfPreview && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100 dark:border-slate-800">
+            <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Pré-visualização — {ordem.numero}.pdf</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleBaixarPdf}
+                className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors"
+              >
+                <FileDown className="icon-sm" /> Baixar PDF
+              </button>
+              <button
+                onClick={() => setPdfPreview(null)}
+                aria-label="Fechar pré-visualização"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5"
+              >
+                <X className="icon-sm" />
+              </button>
+            </div>
+          </div>
+          <iframe src={pdfPreview.url} title={`Pré-visualização de ${ordem.numero}.pdf`} className="w-full h-[70vh] border-0" />
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {resumoItens.map((item) => (
           <div key={item.label} className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3 text-center">
@@ -446,68 +555,141 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
         ))}
       </div>
 
-      {ordem.motivoRecusa && (
+      {/* Referência manual pro app "Aniel" — ponte até existir integração via
+          API. Pode já vir preenchida da delegação, ou ser adicionada/editada
+          aqui a qualquer momento. */}
+      <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+            <Link2 size={11} /> OS Aniel
+          </p>
+          {!editandoRef && canManageOrders && (
+            <button
+              onClick={() => setEditandoRef(true)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 -m-1"
+              aria-label="Editar referência OS Aniel"
+            >
+              <Pencil size={12} />
+            </button>
+          )}
+        </div>
+        {editandoRef ? (
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={refValor}
+              onChange={(e) => setRefValor(e.target.value)}
+              placeholder="Referência da atividade no Aniel"
+              className="flex-1 min-w-0 px-2.5 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+            />
+            <button
+              onClick={handleSalvarRef}
+              disabled={salvandoRef}
+              className="text-xs font-bold text-amber-600 dark:text-amber-400 disabled:opacity-40 shrink-0 px-2"
+            >
+              {salvandoRef ? <Loader2 size={14} className="animate-spin" /> : 'Salvar'}
+            </button>
+            <button
+              onClick={() => { setEditandoRef(false); setRefValor(ordem.referenciaExterna ?? ''); }}
+              disabled={salvandoRef}
+              className="text-xs font-bold text-slate-400 shrink-0"
+            >
+              Cancelar
+            </button>
+          </div>
+        ) : (
+          <p className={cn('text-sm font-bold', ordem.referenciaExterna ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 italic font-normal')}>
+            {ordem.referenciaExterna || 'Não informada'}
+          </p>
+        )}
+      </div>
+
+      {/* Só enquanto o retrabalho ainda está em aberto — depois de finalizada
+          de novo, o motivo de uma reabertura antiga não é mais relevante e só confunde. */}
+      {['reaberta', 'finalizada'].includes(ordem.status) && ordem.motivoRecusa && (
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/50 rounded-xl px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
-          <span className="font-bold">Observação do retrabalho: </span>{ordem.motivoRecusa}
+          <span className="font-bold">Observação da reabertura: </span>{ordem.motivoRecusa}
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          onClick={() => setAcao('aprovar')}
-          disabled={ordem.status !== 'aguardando_aprovacao'}
-          className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-40 text-white text-sm font-bold py-3 rounded-xl transition-colors"
-        >
-          <ThumbsUp size={16} /> Aprovar
-        </button>
-        <button
-          onClick={() => setAcao('corrigir')}
-          disabled={ordem.status !== 'aguardando_aprovacao'}
-          className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-bold py-3 rounded-xl transition-colors"
-        >
-          <MessageSquareWarning size={16} /> Retrabalho
-        </button>
-        <button
-          onClick={() => setAcao('reabrir')}
-          disabled={!['aprovada', 'concluida', 'cancelada'].includes(ordem.status)}
-          className="flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 text-sm font-bold py-3 rounded-xl transition-colors"
-        >
-          <RotateCcw size={16} /> Reabrir Ordem
-        </button>
-        <button
-          onClick={() => setAcao('cancelar')}
-          disabled={['cancelada', 'aprovada', 'concluida'].includes(ordem.status)}
-          className="flex items-center justify-center gap-2 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 text-sm font-bold py-3 rounded-xl transition-colors"
-        >
-          <Ban size={16} /> Cancelar
-        </button>
-      </div>
+      {/* Encerramento definitivo — só aparece quando o técnico já finalizou.
+          Não bloqueia nada que já funciona (a OS já conta como concluída nos
+          dashboards desde 'finalizada'); é um carimbo opcional de revisão. */}
+      {ordem.status === 'finalizada' && (
+        <div className="bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800/50 rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-black text-green-800 dark:text-green-400">Serviço finalizado pelo técnico</p>
+            <p className="text-xs text-green-700 dark:text-green-400/80 mt-0.5">
+              {canManageOrders
+                ? 'Encerre definitivamente depois de revisar — você ainda pode reabrir mais tarde se precisar.'
+                : 'Aguardando revisão do gestor ou supervisor.'}
+            </p>
+          </div>
+          {canManageOrders && (
+            <button
+              onClick={() => setAcao('encerrar')}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-sm transition-colors shrink-0"
+            >
+              <CheckCheck className="icon-md" /> Encerrar definitivamente
+            </button>
+          )}
+        </div>
+      )}
+
+      {ordem.status === 'aprovada' && (
+        <div className="bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800/50 rounded-2xl p-4 flex items-center gap-3">
+          <CheckCheck className="icon-md text-green-600 dark:text-green-400 shrink-0" />
+          <p className="text-sm text-green-800 dark:text-green-400">
+            <span className="font-black">OS encerrada definitivamente</span>
+            {ordem.aprovadoEm && ` em ${new Date(ordem.aprovadoEm).toLocaleString('pt-BR')}`}.
+          </p>
+        </div>
+      )}
+
+      {canManageOrders && (
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => setAcao('reabrir')}
+            disabled={!['finalizada', 'aprovada', 'concluida', 'cancelada'].includes(ordem.status)}
+            className="flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 text-sm font-bold py-3 rounded-xl transition-colors"
+          >
+            <RotateCcw className="icon-md" /> Reabrir Ordem
+          </button>
+          <button
+            onClick={() => setAcao('cancelar')}
+            disabled={['cancelada', 'finalizada', 'aprovada', 'concluida'].includes(ordem.status)}
+            className="flex items-center justify-center gap-2 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 text-sm font-bold py-3 rounded-xl transition-colors"
+          >
+            <Ban className="icon-md" /> Cancelar
+          </button>
+        </div>
+      )}
 
       {acao && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4" onClick={() => !processando && setAcao(null)}>
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
           <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-black text-slate-800 dark:text-slate-100">
-              {acao === 'aprovar' && 'Aprovar OS?'}
-              {acao === 'corrigir' && 'Enviar para retrabalho'}
               {acao === 'reabrir' && 'Reabrir OS?'}
               {acao === 'cancelar' && 'Cancelar OS?'}
+              {acao === 'encerrar' && 'Encerrar definitivamente?'}
             </h3>
-            {acao === 'corrigir' && (
+            {acao === 'reabrir' && (
               <p className="text-xs text-slate-500 -mt-2">
-                O técnico recebe a OS de volta; nada do que já foi registrado é apagado.
+                O técnico recebe a OS de volta pra retrabalho; nada do que já foi registrado é apagado.
               </p>
             )}
-            {mostraMotivo && (
+            {acao === 'encerrar' && (
+              <p className="text-xs text-slate-500 -mt-2">
+                Marca a OS como oficialmente concluída. Você ainda pode reabrir depois, se precisar.
+              </p>
+            )}
+            {acao !== 'encerrar' && (
               <textarea
                 value={motivo}
                 onChange={(e) => setMotivo(e.target.value)}
                 rows={3}
-                placeholder={
-                  acao === 'corrigir' ? 'Observação adicional (opcional)'
-                  : acao === 'reabrir' ? 'Motivo da reabertura (opcional)'
-                  : 'Motivo do cancelamento'
-                }
+                placeholder={acao === 'reabrir' ? 'Motivo da reabertura (opcional)' : 'Motivo do cancelamento'}
                 className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 resize-none"
               />
             )}
@@ -520,7 +702,7 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
                 disabled={processando || (motivoObrigatorio && !motivo.trim())}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-bold transition-colors"
               >
-                {processando && <Loader2 size={14} className="animate-spin" />} Confirmar
+                {processando && <Loader2 className="icon-sm animate-spin" />} Confirmar
               </button>
             </div>
           </div>
@@ -556,6 +738,7 @@ function AbaHistorico({ ordem }: { ordem: ManutencaoOrdem }) {
 const ABA_KEYS = ABAS.map((a) => a.key);
 
 export default function ManutencaoOrderDetail() {
+  const { canManageOrders } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -621,7 +804,7 @@ export default function ManutencaoOrderDetail() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-slate-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Carregando...
+        <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
       </div>
     );
   }
@@ -683,16 +866,31 @@ export default function ManutencaoOrderDetail() {
                 : 'bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800',
             )}
           >
-            {a.icon && <a.icon size={12} />} {a.label}
+            {a.icon && <a.icon className="icon-sm" />} {a.label}
+            {/* "Encerramento" só é ação de verdade pra quem gerencia — pra
+                quem só acompanha (Técnico LA), vira mais uma aba de leitura. */}
+            {(a.readOnly || (a.key === 'aprovacao' && !canManageOrders)) && <Lock size={10} className="opacity-50" />}
           </button>
         ))}
       </div>
+      <p className="text-[10px] text-slate-400 flex items-center gap-1 -mt-2">
+        <Lock size={9} /> = aba somente leitura
+      </p>
 
       {/* Conteúdo da aba */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
         {aba === 'resumo' && (
           <div className="space-y-3 text-sm">
-            <p><span className="font-bold text-slate-500">Problema informado: </span>{ordem.problemaInformado || '—'}</p>
+            <div>
+              <span className="font-bold text-slate-500">Problema informado: </span>
+              {ordem.problemaInformado ? (
+                <ul className="list-disc list-inside mt-1">
+                  {deserializeProblemas(ordem.problemaInformado).map((problema, i) => (
+                    <li key={i}>{problema}</li>
+                  ))}
+                </ul>
+              ) : '—'}
+            </div>
             <p><span className="font-bold text-slate-500">Endereço: </span>{ordem.endereco || '—'}, {ordem.numeroEndereco || 's/n'} — {ordem.bairro || '—'}</p>
             <p><span className="font-bold text-slate-500">Data prevista: </span>{ordem.dataPrevista || '—'} às {ordem.horarioPrevisto || '—'}</p>
             <p><span className="font-bold text-slate-500">Observações: </span>{ordem.observacoes || '—'}</p>

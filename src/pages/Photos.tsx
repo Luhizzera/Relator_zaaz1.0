@@ -222,9 +222,9 @@ export default function Photos() {
   useEffect(() => {
     const ref = config?.codigoReferencia;
     document.title = photos.length > 0
-      ? `ZAAZ · ${photos.length} foto${photos.length > 1 ? 's' : ''}${ref ? ` · ${ref}` : ''}`
-      : 'ZAAZ · Relator de Projetos';
-    return () => { document.title = 'ZAAZ · Relator de Projetos'; };
+      ? `SurveyOS · ${photos.length} foto${photos.length > 1 ? 's' : ''}${ref ? ` · ${ref}` : ''}`
+      : 'SurveyOS · Relatório Fotográfico';
+    return () => { document.title = 'SurveyOS · Relatório Fotográfico'; };
   }, [photos.length, config?.codigoReferencia]);
 
   // ── Recovery ─────────────────────────────
@@ -417,12 +417,14 @@ export default function Photos() {
             </div>
           )}
 
-          {/* Toggle UTM */}
+          {/* Toggle de geolocalização — rótulo padronizado como "GPS" em todo
+              o app (a captura é lat/long puro do navegador, nunca foi UTM de
+              verdade, então dois termos pro mesmo dado só confundiam). */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MapPin size={18} className={cn(useGeo ? 'text-blue-500 animate-pulse' : 'text-slate-300')} />
-                <span className="text-[11px] font-black uppercase tracking-widest dark:text-slate-200">UTM Geotag</span>
+                <span className="text-[11px] font-black uppercase tracking-widest dark:text-slate-200">Geotag (GPS)</span>
               </div>
               <button onClick={() => setUseGeo(!useGeo)}
                 className={cn('relative inline-flex h-6 w-11 items-center rounded-full transition-all duration-300',
@@ -551,7 +553,7 @@ export default function Photos() {
       </main>
 
       <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={(e) => handleFiles(e.target.files!)} className="hidden" />
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleFiles(e.target.files!, true)} className="hidden" />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleFiles(e.target.files!)} className="hidden" />
 
       <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} />
 

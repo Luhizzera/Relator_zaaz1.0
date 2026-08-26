@@ -113,12 +113,15 @@ export const PhotoCard = memo(function PhotoCard({
 
       <div className="p-3 space-y-3">
 
-        {/* Badge UTM */}
+        {/* Badge de localização — mesmo termo (GPS) usado em toda a Localização
+            da foto/OS; nunca foi UTM de verdade (é lat/long puro do
+            navegador), então padronizamos o rótulo pra não confundir os dois
+            sistemas de coordenadas. */}
         {photo.location ? (
           <div className="flex items-center gap-2 px-2.5 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-[#1A1AFF] dark:text-blue-400 rounded-md border border-blue-100 dark:border-blue-800/50 animate-in fade-in slide-in-from-top-1">
             <MapPin size={12} className="shrink-0" />
             <div className="flex flex-col">
-              <span className="text-[9px] uppercase font-black tracking-tighter opacity-70">Coordenadas UTM</span>
+              <span className="text-[9px] uppercase font-black tracking-tighter opacity-70">Coordenadas (GPS)</span>
               <span className="text-[10px] font-mono font-bold leading-none">{photo.location}</span>
             </div>
           </div>

@@ -190,7 +190,7 @@ export default function Config() {
         <div className="container mx-auto px-4 flex items-center justify-between gap-2">
           <BackButton to="/ordens" variant="ghost-dark" />
           <div className="text-center flex-1 min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold leading-tight">O RELATOR DE PROJETOS</h1>
+            <h1 className="text-xl sm:text-2xl font-bold leading-tight">RELATÓRIO FOTOGRÁFICO</h1>
             <p className="text-primary-foreground/50 text-xs sm:text-sm mt-0.5">Configure as informações do documento</p>
           </div>
           <ThemeToggle variant="ghost-dark" />

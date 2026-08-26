@@ -188,9 +188,11 @@ export async function getSignedRelatorioUrl(storagePath: string): Promise<string
 
 export type StatusOSRow =
   | 'aberta' | 'atribuida' | 'recebida' | 'deslocamento' | 'no_local' | 'em_execucao'
-  | 'pausada' | 'aguardando_aprovacao' | 'aprovada' | 'reaberta' | 'cancelada' | 'concluida';
+  | 'pausada' | 'finalizada' | 'aprovada' | 'reaberta' | 'cancelada' | 'concluida';
 
 export type PrioridadeOSRow = 'baixa' | 'media' | 'alta' | 'critica';
+
+export type TipoEquipe = 'la' | 'manutencao';
 
 export interface EquipeRow {
   id: string;
@@ -198,6 +200,8 @@ export interface EquipeRow {
   ativa: boolean;
   /** Supervisor que administra esta equipe — quem pode adicionar/remover técnicos dela. */
   supervisor_id: string | null;
+  /** LA (Localização e Ativação) ou Manutenção — mesmo supervisor pode administrar equipes dos dois tipos, alternando na tela (ver MinhaEquipe.tsx). */
+  tipo: TipoEquipe;
   created_at: string;
 }
 
@@ -241,6 +245,9 @@ export interface OrdemManutencaoRow {
   cancelado_em: string | null;
   motivo_cancelamento: string | null;
 
+  /** Ponte manual pro app "Aniel" até existir integração via API — ver migração 0020. */
+  referencia_externa: string | null;
+
   created_at: string;
   updated_at: string;
 }
@@ -280,7 +287,7 @@ export interface FotoManutencaoRow {
   id: string;
   ordem_id: string;
   storage_path: string;
-  categoria: 'antes' | 'durante' | 'depois';
+  categoria: 'antes' | 'depois';
   descricao: string | null;
   created_at: string;
 }
@@ -374,4 +381,82 @@ export async function uploadVideoManutencao(
 export async function deleteVideoManutencaoFromStorage(storagePath: string): Promise<void> {
   const { error } = await supabase.storage.from(VIDEOS_MANUTENCAO_BUCKET).remove([storagePath]);
   if (error) console.error('[Supabase] Erro ao remover vídeo de manutenção do storage:', error);
+}
+
+// ---- Domínio de Vistoria (rota + pendências + backlog) — espelha
+// supabase/migrations/0018_vistoria_backlog.sql. Anexo ao domínio de
+// Manutenção: a pendência pode gerar uma OS corretiva, mas essa OS É uma
+// linha comum de OrdemManutencaoRow (tipo 'Preventiva CTO'/'Preventiva
+// Rede') — só a rota e a pendência em si são entidades novas. ----
+
+export type StatusOrdemVistoria = 'aberta' | 'em_andamento' | 'concluida' | 'cancelada';
+
+export interface OrdemVistoriaRow {
+  id: string;
+  numero: string;
+  titulo: string;
+  status: StatusOrdemVistoria;
+  equipe_id: string | null;
+  tecnico_id: string | null;
+  responsavel_id: string | null;
+  data_prevista: string | null;
+  observacoes: string | null;
+  utm_inicio_lat: number | null;
+  utm_inicio_lng: number | null;
+  utm_fim_lat: number | null;
+  utm_fim_lng: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PendenciaVistoriaRow {
+  id: string;
+  ordem_vistoria_id: string;
+  storage_path: string;
+  latitude: number;
+  longitude: number;
+  observacao: string | null;
+  /** Problemas marcados em campo, serializados por '||' — mesmo vocabulário de PROBLEMAS_CTO_GRUPOS (ver migração 0022). */
+  problemas: string | null;
+  /** Nula = ainda não gerou OS corretiva (pino vermelho). */
+  ordem_corretiva_id: string | null;
+  criado_por: string | null;
+  created_at: string;
+}
+
+const FOTOS_VISTORIA_BUCKET = 'fotos-vistoria';
+
+/** Gera uma URL assinada (1h) para exibir a foto privada de uma pendência de vistoria. */
+export async function getSignedFotoVistoriaUrl(storagePath: string): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(FOTOS_VISTORIA_BUCKET)
+    .createSignedUrl(storagePath, 60 * 60);
+  if (error) {
+    console.error('[Supabase] Erro ao assinar URL da foto de vistoria:', error);
+    return null;
+  }
+  return data?.signedUrl ?? null;
+}
+
+/** Faz upload da foto de uma pendência (data URL base64) e retorna o path salvo. */
+export async function uploadFotoVistoria(
+  dataUrl: string,
+  ordemVistoriaId: string,
+  pendenciaId: string,
+): Promise<string> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const path = `${ordemVistoriaId}/${pendenciaId}.jpg`;
+
+  const { error } = await supabase.storage.from(FOTOS_VISTORIA_BUCKET).upload(path, blob, {
+    contentType: 'image/jpeg',
+    upsert: true,
+  });
+  if (error) throw error;
+  return path;
+}
+
+export async function deleteFotoVistoriaFromStorage(storagePath: string): Promise<void> {
+  const { error } = await supabase.storage.from(FOTOS_VISTORIA_BUCKET).remove([storagePath]);
+  if (error) console.error('[Supabase] Erro ao remover foto de vistoria do storage:', error);
 }

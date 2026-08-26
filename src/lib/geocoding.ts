@@ -13,6 +13,44 @@ const UF_POR_ESTADO: Record<string, string> = {
 
 export const ufFromStateName = (name?: string) => (name ? (UF_POR_ESTADO[name] ?? name) : '');
 
+// Preposições que ficam em minúsculo dentro do nome (só quando não são a
+// primeira palavra) — convenção usual de topônimo em português: "São José
+// dos Campos", "Passo de Camaragibe", "Vila Velha".
+const PREPOSICOES_MINUSCULAS = new Set(['de', 'da', 'do', 'das', 'dos', 'e']);
+
+/**
+ * Normaliza o nome de um município antes de gravar no banco — a mesma
+ * cidade chega aqui de fontes bem diferentes (geocodificação automática via
+ * Nominatim, seleção manual no mapa, ou o técnico digitando de próprio
+ * punho quando a localização não é capturada), cada uma com sua própria
+ * capitalização/espaçamento. Sem isso, "São Paulo", "sao paulo" e "SÃO
+ * PAULO " viram três valores diferentes no filtro de cidade.
+ *
+ * Não inventa/corrige acentuação ausente (ex.: "sao paulo" digitado sem
+ * acento continua sem acento) — isso exigiria uma lista de referência dos
+ * ~5.600 municípios do Brasil, fora do escopo aqui. O que resolve de fato é
+ * a variação de maiúsculas/minúsculas e espaçamento, que é a causa mais
+ * comum de duplicata quando a mesma cidade é digitada em momentos diferentes.
+ */
+export function normalizarNomeCidade(valor?: string | null): string {
+  if (!valor) return '';
+  const limpo = valor.trim().replace(/\s+/g, ' ');
+  if (!limpo) return '';
+
+  const capitalizarParte = (parte: string) =>
+    parte ? parte.charAt(0).toLocaleUpperCase('pt-BR') + parte.slice(1) : parte;
+
+  return limpo
+    .split(' ')
+    .map((palavra, i) => {
+      const lower = palavra.toLocaleLowerCase('pt-BR');
+      if (i > 0 && PREPOSICOES_MINUSCULAS.has(lower)) return lower;
+      // Cidades com hífen (ex.: "Embu-Guaçu") capitalizam os dois lados.
+      return lower.split('-').map(capitalizarParte).join('-');
+    })
+    .join(' ');
+}
+
 export interface ReverseGeocodeResult {
   bairro: string;
   municipio: string;
@@ -113,8 +151,19 @@ async function buscarNumeroMaisProximo(lat: number, lng: number): Promise<{ nume
  * específico, o que é raro em áreas rurais/infraestrutura de rede. Nesse
  * caso, tentamos um fallback via Overpass (imóvel numerado mais próximo,
  * até 60m) antes de desistir e deixar o campo em branco pro usuário digitar.
+ *
+ * Esse fallback é CARO: os espelhos públicos caem com frequência, e cada um
+ * fora do ar custa 7s de timeout antes de tentar o próximo (medido: dois dos
+ * três espelhos indisponíveis = ~9s só nessa etapa). Num formulário que o
+ * usuário está preenchendo, a espera se dilui; num fluxo automático de um
+ * clique só, ela vira a operação inteira. Por isso `buscarNumeroAproximado`
+ * pode ser desligado por quem chama — ver gerarOSCorretivaDaPendencia.
  */
-export async function reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResult | null> {
+export async function reverseGeocode(
+  lat: number,
+  lng: number,
+  opts: { buscarNumeroAproximado?: boolean } = {},
+): Promise<ReverseGeocodeResult | null> {
   try {
     const res = await fetchComTimeout(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1&zoom=18&accept-language=pt-BR`,
@@ -134,7 +183,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
       referencia: addr.amenity || addr.shop || addr.tourism || '',
     };
 
-    if (!resultado.numeroEndereco) {
+    if (!resultado.numeroEndereco && opts.buscarNumeroAproximado !== false) {
       const proximo = await buscarNumeroMaisProximo(lat, lng);
       if (proximo) {
         resultado.numeroEndereco = proximo.numero;

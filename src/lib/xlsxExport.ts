@@ -25,7 +25,7 @@ export async function exportToXlsx(
   const { default: ExcelJS } = await import('exceljs');
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'ZAAZ System';
+  workbook.creator = 'SurveyOS';
   workbook.created = new Date();
 
   const sheet = workbook.addWorksheet(sheetName, {
