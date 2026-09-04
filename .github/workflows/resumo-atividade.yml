@@ -36,7 +36,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 22, não 20: o @supabase/supabase-js declara `node: '>=22.0.0'` e
+          # usa o WebSocket global, que só existe a partir do 22. No 20 o
+          # cliente nem chega a ser construído — falha em _initRealtimeClient
+          # antes de qualquer consulta.
+          node-version: '22'
           cache: npm
 
       - run: npm ci
