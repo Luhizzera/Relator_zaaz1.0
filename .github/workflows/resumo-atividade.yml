@@ -1,16 +1,21 @@
 name: Resumo de atividade
 
-# Segunda, quarta e sexta às 8h de Brasília. O cron do GitHub é sempre UTC e
-# não entende fuso, então 08:00 BRT = 11:00 UTC — o Brasil não tem mais
-# horário de verão, então esse deslocamento é fixo o ano todo.
+# Todo dia às 8h de Brasília. O cron do GitHub é sempre UTC e não entende
+# fuso, então 08:00 BRT = 11:00 UTC — o Brasil não tem mais horário de verão,
+# então esse deslocamento é fixo o ano todo.
+#
+# Era segunda/quarta/sexta ('0 11 * * 1,3,5') até a diretoria pedir cadência
+# diária. Inclui sábado e domingo porque foi isso que foi pedido; para só dias
+# úteis, o campo dos dias vira '1-5'.
 #
 # Duas ressalvas do agendador do GitHub, que valem saber antes de confiar nele:
 #   • o disparo não é pontual — sob carga, atrasa de alguns minutos a dezenas;
 #   • workflows agendados são desativados após 60 dias sem commit no repositório
-#     (o GitHub avisa por e-mail antes).
+#     (o GitHub avisa por e-mail antes) — o que na prática não nos afeta, já
+#     que cada execução commita o relatório do dia.
 on:
   schedule:
-    - cron: '0 11 * * 1,3,5'
+    - cron: '0 11 * * *'
   # Permite rodar na hora pelo botão "Run workflow", sem esperar o horário —
   # é assim que se testa a configuração sem mexer no cron.
   workflow_dispatch:
