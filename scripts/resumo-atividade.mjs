@@ -41,10 +41,31 @@ function lerEnv(arquivo) {
 
 const env = { ...lerEnv(path.join(RAIZ, '.env')), ...process.env };
 
-const URL_SUPABASE = env.VITE_SUPABASE_URL;
-const ANON = env.VITE_SUPABASE_ANON_KEY;
-const EMAIL = env.RESUMO_EMAIL;
-const SENHA = env.RESUMO_SENHA;
+/**
+ * Higieniza o que veio de secret do GitHub. Ao contrário do `.env`, que já é
+ * parseado linha a linha, um secret é texto colado à mão — e os três erros de
+ * colagem abaixo são invisíveis na interface, porque ela mascara o valor:
+ *
+ *   1. o nome da variável junto:  VITE_SUPABASE_URL=https://…
+ *   2. aspas em volta:            "https://…"
+ *   3. espaço ou quebra de linha no fim
+ *
+ * Qualquer um deles fazia o script morrer com um erro que não dizia a causa.
+ */
+function limpar(nome, valor) {
+  if (!valor) return valor;
+  let v = String(valor).trim();
+  if (v.startsWith(`${nome}=`)) v = v.slice(nome.length + 1).trim();
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    v = v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+const URL_SUPABASE = limpar('VITE_SUPABASE_URL', env.VITE_SUPABASE_URL);
+const ANON = limpar('VITE_SUPABASE_ANON_KEY', env.VITE_SUPABASE_ANON_KEY);
+const EMAIL = limpar('RESUMO_EMAIL', env.RESUMO_EMAIL);
+const SENHA = limpar('RESUMO_SENHA', env.RESUMO_SENHA);
 
 function abortar(msg) {
   console.error('\n[resumo-atividade] ' + msg + '\n');
@@ -58,7 +79,31 @@ function abortar(msg) {
 const idxSimular = process.argv.indexOf('--simular');
 const ARQUIVO_SIMULADO = idxSimular > -1 ? process.argv[idxSimular + 1] : null;
 
-if (!ARQUIVO_SIMULADO && (!URL_SUPABASE || !ANON)) abortar('VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY precisam estar no .env.');
+if (!ARQUIVO_SIMULADO && (!URL_SUPABASE || !ANON)) abortar('VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY precisam estar no .env (ou nos secrets do GitHub).');
+
+// Valida aqui em vez de deixar o supabase-js estourar lá dentro: o erro dele
+// ("Invalid supabaseUrl") não diz de onde veio o valor nem o que ele recebeu,
+// o que transforma um erro de colagem numa caça ao tesouro.
+if (!ARQUIVO_SIMULADO && !/^https?:\/\//i.test(URL_SUPABASE)) {
+  abortar(
+    'VITE_SUPABASE_URL não parece uma URL — precisa começar com https://\n\n'
+    + `Recebido: "${URL_SUPABASE.slice(0, 30)}${URL_SUPABASE.length > 30 ? '…' : ''}" (${URL_SUPABASE.length} caracteres)\n\n`
+    + 'Se veio dos secrets do GitHub, cole SÓ o valor — sem o nome da variável\n'
+    + 'antes do "=", sem aspas e sem quebra de linha. O correto se parece com:\n'
+    + '  https://xxxxxxxxxxxx.supabase.co',
+  );
+}
+
+// Dois formatos válidos: o JWT clássico (começa com "eyJ") e a chave
+// publicável nova do Supabase ("sb_publishable_…"). Aceita os dois pra que
+// uma migração de formato não derrube a rotina com erro enganoso.
+if (!ARQUIVO_SIMULADO && !/^(eyJ|sb_)/.test(ANON)) {
+  abortar(
+    'VITE_SUPABASE_ANON_KEY não parece uma chave válida — deveria começar com "eyJ" ou "sb_".\n\n'
+    + `Recebido: "${ANON.slice(0, 12)}…" (${ANON.length} caracteres)\n\n`
+    + 'Cole só o valor, sem o nome da variável e sem aspas.',
+  );
+}
 if (!ARQUIVO_SIMULADO && (!EMAIL || !SENHA)) {
   abortar(
     'Faltam as credenciais da conta de relatório.\n'
