@@ -1,0 +1,106 @@
+name: Enviar resumo
+
+# Chamado pelo "Resumo de atividade", uma vez por tentativa.
+#
+# Existe como workflow reutilizável, e não como passo repetido, por dois
+# motivos. O primeiro é que cada job ganha o próprio runner — e como o servidor
+# de e-mail descarta parte dos IPs da Azure, runner novo é a única forma de
+# tirar um IP novo. Repetir dentro do mesmo job repetiria o mesmo IP, e um IP
+# bloqueado continua bloqueado.
+#
+# O segundo é que a definição do e-mail fica em um lugar só. Copiada quatro
+# vezes, mudar o assunto ou um anexo viraria quatro edições — e a que
+# esquecessem enviaria coisa diferente das outras.
+#
+# O job NUNCA falha por causa de bloqueio: ele reporta o desfecho pela saída
+# `entregue`. Isso é deliberado. Se uma tentativa bloqueada reprovasse o job, a
+# execução ficaria vermelha mesmo quando a tentativa seguinte entregasse — e um
+# aviso de erro que chega junto com o relatório entregue ensina todo mundo a
+# ignorar avisos de erro.
+on:
+  workflow_call:
+    inputs:
+      assunto:
+        required: true
+        type: string
+    outputs:
+      entregue:
+        description: '"sim" quando a mensagem saiu; "nao" quando o IP foi descartado ou o envio falhou'
+        value: ${{ jobs.enviar.outputs.entregue }}
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    outputs:
+      entregue: ${{ steps.resultado.outputs.entregue }}
+    steps:
+      - name: Baixar o que foi gerado
+        uses: actions/download-artifact@v4
+        with:
+          name: envio
+          path: envio
+
+      # Sem esta verificação, um IP bloqueado custaria os 2 minutos inteiros do
+      # timeout do nodemailer antes de liberar a vez para a próxima tentativa.
+      # Com ela, custa 20 segundos. Numa cadeia de quatro, é a diferença entre
+      # oito minutos e dois.
+      - name: Conferir se este IP alcança o servidor
+        id: alcance
+        continue-on-error: true
+        shell: bash --noprofile --norc {0}
+        env:
+          HOST: ${{ secrets.SMTP_SERVIDOR }}
+          PORTA: ${{ secrets.SMTP_PORTA }}
+        run: |
+          ip=$(curl -s --max-time 10 https://api.ipify.org)
+          if timeout 20 bash -c "exec 3<>/dev/tcp/$HOST/$PORTA" 2>/dev/null; then
+            echo "IP $ip alcança o servidor. Seguindo para o envio."
+            echo "IP \`$ip\` — alcançou o servidor" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "IP $ip foi descartado pelo firewall do servidor de e-mail."
+          echo "Desistindo agora para a próxima tentativa começar sem esperar o timeout."
+          echo "IP \`$ip\` — **descartado pelo firewall**" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      # Os caminhos absolutos que o script emitiu valem no runner que gerou, e
+      # este é outro. Como a pasta `envio` traz exatamente uma planilha e um
+      # documento, o glob resolve sem ambiguidade.
+      - name: Localizar os anexos
+        id: anexos
+        if: steps.alcance.outcome == 'success'
+        run: |
+          echo "xlsx=$(ls envio/*.xlsx)" >> "$GITHUB_OUTPUT"
+          echo "docx=$(ls envio/*.docx)" >> "$GITHUB_OUTPUT"
+
+      - name: Enviar
+        id: envio
+        if: steps.alcance.outcome == 'success'
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVIDOR }}
+          server_port: ${{ secrets.SMTP_PORTA }}
+          # TLS implícito só na 465; na 587 o STARTTLS sobe a conexão depois.
+          secure: ${{ secrets.SMTP_PORTA == '465' }}
+          username: ${{ secrets.SMTP_USUARIO }}
+          password: ${{ secrets.SMTP_SENHA }}
+          from: SurveyOS <${{ secrets.SMTP_USUARIO }}>
+          to: ${{ secrets.RESUMO_DESTINATARIOS }}
+          subject: ${{ inputs.assunto }}
+          html_body: file://envio/corpo-email.html
+          attachments: ${{ steps.anexos.outputs.xlsx }},${{ steps.anexos.outputs.docx }}
+          convert_markdown: false
+
+      # `outcome` é o desfecho antes do continue-on-error ser aplicado, então
+      # ele enxerga a falha que o passo engoliu.
+      - name: Registrar o desfecho
+        id: resultado
+        run: |
+          if [ '${{ steps.envio.outcome }}' = 'success' ]; then
+            echo 'entregue=sim' >> "$GITHUB_OUTPUT"
+            echo 'Mensagem entregue.'
+          else
+            echo 'entregue=nao' >> "$GITHUB_OUTPUT"
+            echo 'Não entregue nesta tentativa.'
+          fi

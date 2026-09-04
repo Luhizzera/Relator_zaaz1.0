@@ -23,14 +23,15 @@ jobs:
   gerar:
     runs-on: ubuntu-latest
     # Promovido a env do job porque o contexto `secrets` não é avaliado dentro
-    # do `if:` de um step — só o `env` do job é. É o que permite o envio ficar
-    # desligado até alguém preencher a lista de destinatários.
+    # do `if:` de um step — só o `env` do job é.
     env:
       DESTINATARIOS: ${{ secrets.RESUMO_DESTINATARIOS }}
-      ALERTA: ${{ secrets.RESUMO_ALERTA }}
       # O runner roda em UTC. Sem fixar o fuso, uma execução perto da virada do
       # dia nomearia o arquivo com uma data e escreveria outra no cabeçalho.
       TZ: America/Sao_Paulo
+    outputs:
+      dataCompleta: ${{ steps.gerar.outputs.dataCompleta }}
+      temDestinatarios: ${{ steps.destinatarios.outputs.tem }}
     steps:
       - uses: actions/checkout@v4
 
@@ -66,61 +67,34 @@ jobs:
           git commit -m "Resumo de atividade — ${{ steps.gerar.outputs.data }}"
           git push
 
-      # Só envia se a geração deu certo — um anexo vazio ou desatualizado
-      # circulando entre responsáveis é pior que e-mail nenhum.
-      #
-      # O passo é pulado por completo quando RESUMO_DESTINATARIOS não existe,
-      # então o workflow pode ser ligado e observado por alguns ciclos antes de
-      # começar a disparar e-mail pra gente de verdade.
-      - name: Enviar por e-mail
-        if: success() && env.DESTINATARIOS != ''
-        uses: dawidd6/action-send-mail@v3
+      # Pasta achatada com só o material do dia. Os jobs de envio rodam em
+      # runners diferentes, onde os caminhos absolutos que o script emitiu não
+      # existem, e `Resumo_atividade/` guarda o histórico inteiro — um glob ali
+      # pegaria o relatório de outra data. Aqui há exatamente um de cada.
+      - name: Empacotar para envio
+        run: |
+          mkdir -p envio
+          cp "${{ steps.gerar.outputs.xlsx }}" "${{ steps.gerar.outputs.docx }}" corpo-email.html envio/
+          ls -la envio/
+
+      - name: Disponibilizar para os envios
+        uses: actions/upload-artifact@v4
         with:
-          # Servidor e porta vêm de secret: a caixa acabou sendo criada no
-          # servidor de hospedagem do domínio, não no tenant 365, e um host
-          # fixo aqui obrigaria a mexer no workflow a cada mudança de provedor.
-          server_address: ${{ secrets.SMTP_SERVIDOR }}
-          server_port: ${{ secrets.SMTP_PORTA }}
-          # `secure` significa TLS implícito desde o handshake — verdadeiro só
-          # na 465. A 587 abre em claro e sobe pra TLS via STARTTLS; marcar
-          # true nela faz o envio travar até dar timeout, sem erro legível.
-          secure: ${{ secrets.SMTP_PORTA == '465' }}
-          username: ${{ secrets.SMTP_USUARIO }}
-          password: ${{ secrets.SMTP_SENHA }}
-          from: SurveyOS <${{ secrets.SMTP_USUARIO }}>
-          to: ${{ secrets.RESUMO_DESTINATARIOS }}
-          subject: 'SurveyOS — Resumo de atividade · ${{ steps.gerar.outputs.dataCompleta }}'
-          html_body: file://corpo-email.html
-          # Caminhos vêm do próprio script: o nome muda a cada execução, então
-          # um caminho fixo aqui anexaria a versão errada — ou nenhuma.
-          attachments: ${{ steps.gerar.outputs.xlsx }},${{ steps.gerar.outputs.docx }}
-          convert_markdown: false
+          name: envio
+          path: envio/
+          retention-days: 7
 
-      # O e-mail é o registro durável de cada rodada, então uma falha não pode
-      # virar silêncio: sem este passo, um dia sem relatório é indistinguível
-      # de um dia em que ninguém reparou que faltou. Vai só pro endereço de
-      # alerta, não pros gestores — quem recebe o relatório não precisa lidar
-      # com erro de automação.
-      - name: Avisar sobre falha
-        if: failure() && env.ALERTA != ''
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_SERVIDOR }}
-          server_port: ${{ secrets.SMTP_PORTA }}
-          secure: ${{ secrets.SMTP_PORTA == '465' }}
-          username: ${{ secrets.SMTP_USUARIO }}
-          password: ${{ secrets.SMTP_SENHA }}
-          from: SurveyOS <${{ secrets.SMTP_USUARIO }}>
-          to: ${{ secrets.RESUMO_ALERTA }}
-          subject: '[FALHA] SurveyOS — o resumo de hoje não foi gerado'
-          body: |
-            A rotina de resumo falhou e nenhum relatório foi enviado hoje.
-
-            Execução: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            Os gestores NÃO foram avisados — para eles, hoje simplesmente não
-            chegou e-mail. Se o problema não for resolvido antes da próxima
-            execução agendada, considere avisá-los manualmente.
+      # Precisa virar output porque `secrets` não é visível no `if:` de um job,
+      # e é o `if:` dos jobs de envio que decide se eles chegam a existir.
+      - name: Ver se há destinatários configurados
+        id: destinatarios
+        run: |
+          if [ -n "$DESTINATARIOS" ]; then
+            echo 'tem=sim' >> "$GITHUB_OUTPUT"
+          else
+            echo 'tem=nao' >> "$GITHUB_OUTPUT"
+            echo 'RESUMO_DESTINATARIOS está vazio — nada será enviado.'
+          fi
 
       # Rede de segurança: se o push falhar (branch protegida, por exemplo), os
       # arquivos ainda ficam baixáveis pela página da execução por 90 dias.
@@ -131,3 +105,102 @@ jobs:
           name: resumo-atividade
           path: Resumo_atividade/
           retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # Quatro tentativas de envio, cada uma em seu próprio job.
+  #
+  # O servidor de e-mail descarta parte dos IPs da Azure — medimos 5 de 8
+  # conexões aceitas, no mesmo segundo e contra o mesmo destino. Como o GitHub
+  # sorteia o runner por job, cada tentativa aqui sai de um IP novo, e portanto
+  # de um sorteio novo. Repetir dentro de um mesmo job não adiantaria: mesmo
+  # runner, mesmo IP, mesmo bloqueio.
+  #
+  # A 62,5% por tentativa, uma entrega 62,5% das vezes; quatro entregam 98%.
+  # É mitigação, não cura — a cura é liberar o IP no firewall da hospedagem ou
+  # sair do SMTP. Enquanto o chamado não anda, isto segura a entrega.
+  #
+  # Cada job só roda se o anterior não entregou, então no caso normal só a
+  # primeira tentativa existe.
+  #
+  # O encadeamento olha a saída `entregue`, e não o resultado do job, de
+  # propósito: os jobs de envio terminam verdes mesmo quando o IP é bloqueado.
+  # Assim a execução só fica vermelha quando o relatório realmente não chegou a
+  # ninguém — verde passa a significar entregue, e não "rodou até o fim".
+  # ---------------------------------------------------------------------------
+  enviar-1:
+    needs: gerar
+    if: needs.gerar.outputs.temDestinatarios == 'sim'
+    uses: ./.github/workflows/enviar-resumo.yml
+    with:
+      assunto: 'SurveyOS — Resumo de atividade · ${{ needs.gerar.outputs.dataCompleta }}'
+    secrets: inherit
+
+  enviar-2:
+    needs: [gerar, enviar-1]
+    if: always() && needs.enviar-1.result != 'skipped' && needs.enviar-1.outputs.entregue != 'sim'
+    uses: ./.github/workflows/enviar-resumo.yml
+    with:
+      assunto: 'SurveyOS — Resumo de atividade · ${{ needs.gerar.outputs.dataCompleta }}'
+    secrets: inherit
+
+  enviar-3:
+    needs: [gerar, enviar-1, enviar-2]
+    if: always() && needs.enviar-2.result != 'skipped' && needs.enviar-2.outputs.entregue != 'sim'
+    uses: ./.github/workflows/enviar-resumo.yml
+    with:
+      assunto: 'SurveyOS — Resumo de atividade · ${{ needs.gerar.outputs.dataCompleta }}'
+    secrets: inherit
+
+  enviar-4:
+    needs: [gerar, enviar-1, enviar-2, enviar-3]
+    if: always() && needs.enviar-3.result != 'skipped' && needs.enviar-3.outputs.entregue != 'sim'
+    uses: ./.github/workflows/enviar-resumo.yml
+    with:
+      assunto: 'SurveyOS — Resumo de atividade · ${{ needs.gerar.outputs.dataCompleta }}'
+    secrets: inherit
+
+  # O e-mail é o registro durável de cada rodada, então uma falha não pode
+  # virar silêncio: sem este job, um dia sem relatório é indistinguível de um
+  # dia em que ninguém reparou que faltou. Vai só pro endereço de alerta, não
+  # pros gestores — quem recebe o relatório não precisa lidar com erro de
+  # automação.
+  #
+  # Roda em runner próprio, logo tem o próprio sorteio de IP. Se as quatro
+  # tentativas falharem e o aviso também, a execução ainda fica marcada como
+  # falha na aba Actions, e o GitHub notifica quem mexeu no cron por último.
+  avisar:
+    needs: [gerar, enviar-1, enviar-2, enviar-3, enviar-4]
+    if: always() && (needs.gerar.result == 'failure' || (needs.enviar-4.result != 'skipped' && needs.enviar-4.outputs.entregue != 'sim'))
+    runs-on: ubuntu-latest
+    env:
+      ALERTA: ${{ secrets.RESUMO_ALERTA }}
+    steps:
+      - name: Avisar sobre falha
+        if: env.ALERTA != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVIDOR }}
+          server_port: ${{ secrets.SMTP_PORTA }}
+          secure: ${{ secrets.SMTP_PORTA == '465' }}
+          username: ${{ secrets.SMTP_USUARIO }}
+          password: ${{ secrets.SMTP_SENHA }}
+          from: SurveyOS <${{ secrets.SMTP_USUARIO }}>
+          to: ${{ secrets.RESUMO_ALERTA }}
+          subject: '[FALHA] SurveyOS — o resumo de hoje não foi entregue'
+          body: |
+            A rotina de resumo não conseguiu entregar o relatório hoje.
+
+            Execução: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Os gestores NÃO foram avisados — para eles, hoje simplesmente não
+            chegou e-mail. Os arquivos estão commitados em Resumo_atividade/ e
+            anexados à execução, prontos para envio manual.
+
+      # Como os jobs de envio terminam verdes por desenho, este é o único lugar
+      # que pinta a execução de vermelho — e ele significa exatamente uma coisa:
+      # o relatório não chegou a ninguém. Roda mesmo sem endereço de alerta
+      # configurado, senão a falha sumiria da aba Actions também.
+      - name: Reprovar a execução
+        run: |
+          echo 'Nenhuma das quatro tentativas entregou o relatório.'
+          exit 1
