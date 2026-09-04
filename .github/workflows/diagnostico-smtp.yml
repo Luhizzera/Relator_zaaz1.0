@@ -1,104 +1,50 @@
 name: Diagnóstico SMTP
 
-# Workflow descartável. Segunda rodada.
+# Coleta evidência para o chamado do firewall.
 #
-# A primeira rodada mostrou secrets limpos e a porta 587 ABERTA em menos de um
-# segundo — mas rodou em northcentralus, enquanto os envios que falharam saíram
-# de centralus e eastus. Ou seja: provou alcance de um IP que nunca tentou
-# mandar e-mail, e não reproduziu nada.
+# O TI pediu "os IPs". Não existe lista curta: o GitHub publica 7.251 faixas
+# para o Actions, 5.625 delas IPv4, cobrindo ~28 milhões de endereços, e a
+# lista muda sozinha (https://api.github.com/meta, campo "actions"). Liberar
+# tudo isso não é proposta séria.
 #
-# Esta versão sonda o TCP e tenta o envio real no MESMO runner, no mesmo
-# minuto, com o log interno do nodemailer ligado. Isso separa as duas
-# explicações que sobraram:
+# O que serve para procurar no log do firewall é o oposto: um IP concreto,
+# com horário, que foi descartado. Cada job da matriz roda num runner
+# diferente, logo com IP diferente — uma execução devolve várias amostras de
+# uma vez, umas que passam e outras que não. É esse contraste, vindo do mesmo
+# minuto e do mesmo destino, que fecha o diagnóstico.
 #
-#   • sonda falha + envio falha  -> bloqueio por faixa de IP. Precisa de relay.
-#   • sonda passa  + envio falha -> o servidor sempre esteve alcançável e quem
-#                                   erra é o nodemailer. Conserta-se a chamada.
-#
-# Manda para RESUMO_ALERTA, nunca para a lista de gestores.
-# Apagar depois que o envio estiver resolvido.
+# Só sonda TCP: nada de enviar e-mail, para não gastar 2 minutos de timeout
+# por job. Já sabemos que, de um IP liberado, o envio funciona.
 on:
   workflow_dispatch:
 
 jobs:
-  diagnosticar:
+  sondar:
     runs-on: ubuntu-latest
+    strategy:
+      # Sem isto, a primeira sonda bloqueada cancelaria as outras — e são
+      # justamente as outras que provam que o destino está no ar.
+      fail-fast: false
+      matrix:
+        tentativa: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      TZ: America/Sao_Paulo
     steps:
-      - name: Sondar antes do envio
-        id: antes
-        # Sem `-e`: este passo precisa chegar ao fim mesmo com comando falhando,
-        # que é justamente o que ele mede.
+      - name: Sondar a porta de envio
         shell: bash --noprofile --norc {0}
         env:
           HOST: ${{ secrets.SMTP_SERVIDOR }}
           PORTA: ${{ secrets.SMTP_PORTA }}
         run: |
-          echo "IP de saída deste runner: $(curl -s --max-time 10 https://api.ipify.org)"
-          echo "região: $RUNNER_ENVIRONMENT"
-          echo
+          ip=$(curl -s --max-time 10 https://api.ipify.org)
+          quando=$(date '+%d/%m/%Y %H:%M:%S')
 
-          # Quantidade, não o valor: o endereço resolvido revelaria o host.
-          n4=$(getent ahostsv4 "$HOST" 2>/dev/null | awk '{print $1}' | sort -u | wc -l)
-          n6=$(getent ahostsv6 "$HOST" 2>/dev/null | awk '{print $1}' | grep -c ':')
-          echo "endereços IPv4 publicados: $n4"
-          echo "endereços IPv6 publicados: $n6"
-          if [ "$n6" -gt 0 ]; then
-            echo "  ^ tem AAAA. Os runners do GitHub não têm rota IPv6 — se o"
-            echo "    nodemailer discar o v6 primeiro e não cair pro v4, dá"
-            echo "    exatamente 'Connection timeout' com o servidor no ar."
-          fi
-          echo
+          timeout 20 bash -c "exec 3<>/dev/tcp/$HOST/$PORTA" 2>/dev/null \
+            && resultado="CONECTOU" \
+            || resultado="DESCARTADO (sem resposta)"
 
-          sondar() {
-            timeout 15 bash -c "exec 3<>/dev/tcp/$1/$PORTA" 2>/dev/null && return 0 || return $?
-          }
+          echo "$quando (horário de Brasília) — IP $ip — $resultado"
 
-          echo "-- pelo nome (mesmo caminho que o nodemailer usa) --"
-          sondar "$HOST" && echo "conectou" || echo "FALHOU (código $?)"
-
-          ip4=$(getent ahostsv4 "$HOST" 2>/dev/null | awk '{print $1}' | head -1)
-          echo "-- direto no IPv4, sem passar por resolução --"
-          if [ -n "$ip4" ]; then
-            sondar "$ip4" && echo "conectou" || echo "FALHOU (código $?)"
-          else
-            echo "sem endereço IPv4 — isso por si só explicaria tudo"
-          fi
-
-      # O envio de verdade, no mesmo runner que acabou de sondar. `nodemailerlog`
-      # e `nodemailerdebug` despejam a conversa interna da biblioteca: qual
-      # endereço ela discou, onde parou, o que o servidor respondeu.
-      - name: Tentar envio real
-        id: envio
-        continue-on-error: true
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_SERVIDOR }}
-          server_port: ${{ secrets.SMTP_PORTA }}
-          secure: false
-          username: ${{ secrets.SMTP_USUARIO }}
-          password: ${{ secrets.SMTP_SENHA }}
-          from: SurveyOS <${{ secrets.SMTP_USUARIO }}>
-          to: ${{ secrets.RESUMO_ALERTA }}
-          subject: '[TESTE] SurveyOS — sondagem de SMTP'
-          body: |
-            Mensagem de teste do workflow de diagnóstico.
-            Se ela chegou, o envio a partir dos runners do GitHub funciona.
-          nodemailerlog: true
-          nodemailerdebug: true
-
-      - name: Sondar depois do envio
-        if: always()
-        shell: bash --noprofile --norc {0}
-        env:
-          HOST: ${{ secrets.SMTP_SERVIDOR }}
-          PORTA: ${{ secrets.SMTP_PORTA }}
-        run: |
-          echo "resultado do envio: ${{ steps.envio.outcome }}"
-          echo
-          timeout 15 bash -c "exec 3<>/dev/tcp/$HOST/$PORTA" 2>/dev/null \
-            && echo "sonda depois do envio: conectou" \
-            || echo "sonda depois do envio: FALHOU (código $?)"
-          echo
-          echo "== Leitura =="
-          echo "sonda conectou + envio falhou  -> o servidor está no ar; o erro é do nodemailer."
-          echo "sonda falhou   + envio falhou  -> este IP está bloqueado; precisa de relay."
+          # Vai para a página de resumo da execução, onde os oito jobs
+          # aparecem empilhados e dá para copiar tudo de uma vez pro chamado.
+          echo "\`$ip\` — **$resultado** — $quando (Brasília)" >> "$GITHUB_STEP_SUMMARY"
