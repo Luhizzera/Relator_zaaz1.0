@@ -1,0 +1,72 @@
+name: Diagnóstico SMTP
+
+# Workflow descartável. Existe só para responder uma pergunta: por que o envio
+# de e-mail do "Resumo de atividade" dá Connection timeout a partir dos runners
+# do GitHub, se o mesmo servidor responde normalmente da rede da empresa.
+#
+# Quatro tentativas em dois runs, em regiões diferentes da Azure, todas com
+# timeout de 2 minutos — inclusive o passo de aviso de falha, que é uma segunda
+# conexão dois minutos após a primeira. Isso descarta intermitência.
+#
+# Nenhum secret é impresso. O que sai no log é o comprimento dos valores (para
+# flagrar espaço colado junto) e o nome da porta configurada — número de porta
+# não é segredo, e é justamente o que precisamos enxergar.
+#
+# Apagar este arquivo depois que o envio estiver resolvido.
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnosticar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Testar alcance do servidor de e-mail
+        env:
+          HOST: ${{ secrets.SMTP_SERVIDOR }}
+          PORTA: ${{ secrets.SMTP_PORTA }}
+        run: |
+          echo "=== 1. Sanidade dos secrets ==="
+          echo "SMTP_SERVIDOR: ${#HOST} caracteres"
+          echo "SMTP_PORTA:    ${#PORTA} caracteres  (465/587 têm 3 — mais que isso é espaço ou quebra de linha colada junto)"
+
+          limpo=$(printf '%s' "$HOST" | tr -d '[:space:]')
+          if [ ${#limpo} -ne ${#HOST} ]; then
+            echo "ATENÇÃO: SMTP_SERVIDOR contém espaço ou quebra de linha."
+          fi
+
+          case "$PORTA" in
+            25)   echo "PORTA: 25 — achamos a causa. A Azure bloqueia saída na 25 em toda VM, sem exceção e sem mensagem de erro." ;;
+            465)  echo "PORTA: 465 (TLS implícito)" ;;
+            587)  echo "PORTA: 587 (STARTTLS)" ;;
+            2525) echo "PORTA: 2525 (alternativa comum em hospedagem)" ;;
+            "")   echo "PORTA: VAZIA — o secret não existe ou está em branco." ;;
+            *)    echo "PORTA: valor inesperado — não é 25, 465, 587 nem 2525." ;;
+          esac
+
+          echo
+          echo "=== 2. O nome do servidor resolve? ==="
+          if getent hosts "$HOST" > /dev/null 2>&1; then
+            echo "sim"
+          else
+            echo "NÃO — nome errado no secret, ou lixo colado junto. Nada além disso importa até corrigir."
+            exit 1
+          fi
+
+          echo
+          echo "=== 3. Alcance TCP a partir deste runner ==="
+          # A distinção que interessa: 'timeout' significa pacote descartado em
+          # silêncio, assinatura de firewall bloqueando a origem. 'recusada'
+          # significa que o servidor respondeu dizendo que a porta está fechada
+          # — ou seja, ele é alcançável, só não escuta ali.
+          for p in 25 465 587 2525; do
+            timeout 10 bash -c "exec 3<>/dev/tcp/$HOST/$p" 2>/dev/null && codigo=0 || codigo=$?
+            case $codigo in
+              0)   echo "porta $p: ABERTA" ;;
+              124) echo "porta $p: timeout — pacote descartado (firewall bloqueando este IP)" ;;
+              *)   echo "porta $p: recusada — servidor alcançável, porta fechada" ;;
+            esac
+          done
+
+          echo
+          echo "=== 4. De onde este runner está falando ==="
+          echo "região Azure: ${RUNNER_ENVIRONMENT:-desconhecida} / $(curl -s --max-time 10 https://api.ipify.org || echo 'IP não obtido')"
