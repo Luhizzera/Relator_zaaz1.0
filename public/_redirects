@@ -1,0 +1,20 @@
+# Fallback de SPA para a Netlify.
+#
+# O app usa BrowserRouter, então rotas como /redefinir-senha ou
+# /manutencao/ordens/:id existem só no JavaScript — no servidor não há arquivo
+# algum nesses caminhos. O servidor de desenvolvimento do Vite devolve o
+# index.html para qualquer caminho e esconde o problema; a Netlify, não. Sem
+# esta regra ela responde 404 em todo acesso direto ou F5 fora da raiz.
+#
+# Dois efeitos disso em produção: o link de recuperação de senha do Supabase
+# aponta para /redefinir-senha e cai em 404, e qualquer técnico que recarregue
+# a página no meio de uma execução perde a tela.
+#
+# O código 200 é o que importa aqui. Um 301/302 mudaria a URL na barra de
+# endereços para "/", e o React Router leria a rota errada — além de destruir
+# o fragmento (#access_token=...) que o Supabase usa para entregar a sessão de
+# recuperação. O 200 reescreve servindo o index.html com a URL intacta.
+#
+# Este arquivo mora em public/ porque o Vite copia essa pasta inteira para
+# dist/ no build, que é o diretório publicado.
+/*    /index.html   200
