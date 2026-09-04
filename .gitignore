@@ -37,3 +37,6 @@ dist-ssr
 
 # Cache local da CLI do Supabase — nao e fonte
 supabase/.temp/
+
+# Log da tarefa agendada de resumo
+logs/

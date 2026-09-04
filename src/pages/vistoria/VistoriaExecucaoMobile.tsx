@@ -612,20 +612,22 @@ export default function VistoriaExecucaoMobile() {
 
         {(ordem.utmInicioLat != null || ordem.utmFimLat != null) && (
           <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+            {/* Mesma marca do formulário de abertura (letra + cor + verbo) —
+                o técnico em campo precisa saber de relance por onde começa. */}
             {ordem.utmInicioLat != null && ordem.utmInicioLng != null && (
               <div className="flex items-start gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-                <MapPinned size={13} className="shrink-0 text-green-500 mt-0.5" />
+                <span className="w-5 h-5 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">A</span>
                 <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">UTM Início</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Começa em</p>
                   <p>{ordem.utmInicioLat.toFixed(6)}, {ordem.utmInicioLng.toFixed(6)}</p>
                 </div>
               </div>
             )}
             {ordem.utmFimLat != null && ordem.utmFimLng != null && (
               <div className="flex items-start gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-                <MapPinned size={13} className="shrink-0 text-red-500 mt-0.5" />
+                <span className="w-5 h-5 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">B</span>
                 <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">UTM Fim</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Termina em</p>
                   <p>{ordem.utmFimLat.toFixed(6)}, {ordem.utmFimLng.toFixed(6)}</p>
                 </div>
               </div>

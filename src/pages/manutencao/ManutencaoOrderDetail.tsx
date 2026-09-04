@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Loader2, CheckCircle2, Circle, MinusCircle, Camera, Video, MapPinned,
   Upload, Trash2, Download, X, Play, ExternalLink, RotateCcw,
-  Ban, Lock, CheckCheck, FileDown, Eye, Pencil, Link2,
+  Ban, Lock, CheckCheck, FileDown, Eye, Pencil, Link2, Undo2,
 } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import {
@@ -16,6 +16,7 @@ import {
   reabrirOrdem,
   cancelarOrdem,
   encerrarOrdem,
+  devolverParaFilaDeAtribuicao,
   atualizarReferenciaExterna,
 } from '@/lib/manutencaoService';
 import { exportManutencaoPdf } from '@/lib/manutencaoPdfEngine';
@@ -388,7 +389,7 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
   // segunda checagem é só pra decidir o que MOSTRAR na aba, não segurança.
   const souDono = isTecnicoLA && ordem.responsavelId === profile?.id;
   const podeVerResumo = canManageOrders || souDono;
-  const [acao, setAcao] = useState<'reabrir' | 'cancelar' | 'encerrar' | null>(null);
+  const [acao, setAcao] = useState<'reabrir' | 'cancelar' | 'encerrar' | 'devolver' | null>(null);
   const [motivo, setMotivo] = useState('');
   const [processando, setProcessando] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
@@ -476,6 +477,9 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
       } else if (acao === 'encerrar') {
         await encerrarOrdem(ordem.id);
         toast({ title: 'OS encerrada definitivamente' });
+      } else if (acao === 'devolver') {
+        await devolverParaFilaDeAtribuicao(ordem.id, motivo || undefined);
+        toast({ title: 'OS devolvida para a fila de atribuição' });
       }
       onChanged();
     } catch (err) {
@@ -646,6 +650,29 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
         </div>
       )}
 
+      {/* Estorno de delegação — separado do bloco abaixo de propósito: reabrir
+          e cancelar agem sobre uma OS que já rodou, esta desfaz um erro de
+          roteamento antes disso. Só aparece enquanto a OS tem técnico e ainda
+          não foi encerrada; depois que o trabalho começou, o caminho certo é
+          reabrir ou cancelar, não apagar o vínculo. */}
+      {canManageOrders && !!ordem.tecnicoId
+        && !['finalizada', 'aprovada', 'concluida', 'cancelada'].includes(ordem.status) && (
+        <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <p className="text-sm font-black text-slate-700 dark:text-slate-200">Delegada para o técnico errado?</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Devolve para a fila de atribuição sem apagar nada do que já foi registrado.
+            </p>
+          </div>
+          <button
+            onClick={() => setAcao('devolver')}
+            className="flex items-center gap-2 border border-amber-300 dark:border-amber-800/60 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 text-sm font-bold px-4 py-2.5 rounded-xl transition-colors shrink-0"
+          >
+            <Undo2 className="icon-md" /> Estornar delegação
+          </button>
+        </div>
+      )}
+
       {canManageOrders && (
         <div className="grid grid-cols-2 gap-3">
           <button
@@ -673,10 +700,18 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
               {acao === 'reabrir' && 'Reabrir OS?'}
               {acao === 'cancelar' && 'Cancelar OS?'}
               {acao === 'encerrar' && 'Encerrar definitivamente?'}
+              {acao === 'devolver' && 'Estornar a delegação?'}
             </h3>
             {acao === 'reabrir' && (
               <p className="text-xs text-slate-500 -mt-2">
                 O técnico recebe a OS de volta pra retrabalho; nada do que já foi registrado é apagado.
+              </p>
+            )}
+            {acao === 'devolver' && (
+              <p className="text-xs text-slate-500 -mt-2">
+                A OS volta para a fila de atribuição sem técnico e sem equipe, e some do painel de
+                {ordem.tecnico ? ` ${ordem.tecnico}` : ' quem estava atribuído'}. Ocorrências, materiais,
+                checklist e fotos continuam na OS. O histórico registra quem estava atribuído antes.
               </p>
             )}
             {acao === 'encerrar' && (
@@ -689,7 +724,11 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
                 value={motivo}
                 onChange={(e) => setMotivo(e.target.value)}
                 rows={3}
-                placeholder={acao === 'reabrir' ? 'Motivo da reabertura (opcional)' : 'Motivo do cancelamento'}
+                placeholder={
+                  acao === 'reabrir' ? 'Motivo da reabertura (opcional)'
+                    : acao === 'devolver' ? 'Motivo do estorno (opcional) — ex: OS de Londrina delegada à equipe de MG'
+                      : 'Motivo do cancelamento'
+                }
                 className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 resize-none"
               />
             )}

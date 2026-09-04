@@ -8,7 +8,7 @@ import {
 import type { OrdemVistoriaRow, PendenciaVistoriaRow, ProfileRow } from '@/lib/supabaseClient';
 import {
   OrdemVistoria, PendenciaVistoria, PendenciaBacklog, StatusOrdemVistoria,
-  corDaPendencia, TipoCorretivaVistoria,
+  corDaPendencia, TipoCorretivaVistoria, OrdemBacklog, corDaOrdem,
 } from '@/types/vistoria';
 import { createManutencaoOrder, addFotoManutencao } from '@/lib/manutencaoService';
 import { reverseGeocode } from '@/lib/geocoding';
@@ -263,6 +263,53 @@ export async function listPendenciasBacklog(filtro?: { equipeId?: string }): Pro
       ordemCorretivaNumero: corretiva?.numero ?? null,
       ordemCorretivaStatus: corretiva?.status ?? null,
       cor: corDaPendencia(corretiva?.status ?? null),
+    };
+  });
+}
+
+/**
+ * OS de manutenção com coordenada, prontas pro mapa de backlog — a camada que
+ * convive com as pendências de vistoria.
+ *
+ * Exclui `origem = 'Vistoria'`: essas corretivas nasceram de uma pendência que
+ * já está plotada, e mostrar as duas colocaria dois pinos no mesmo ponto.
+ * Exclui também as canceladas, pelo mesmo motivo que listPendenciasBacklog
+ * ignora rotas canceladas — não são backlog, são histórico.
+ *
+ * Sem coordenada não há o que plotar; OS antigas abertas antes da coleta de
+ * GPS simplesmente não entram.
+ */
+export async function listOrdensBacklog(filtro?: { equipeId?: string }): Promise<OrdemBacklog[]> {
+  let query = supabase
+    .from('ordens_manutencao')
+    .select('id, numero, tipo, origem, prioridade, status, latitude, longitude, municipio, bairro, endereco, created_at, equipe:equipe_id ( nome ), tecnico:tecnico_id ( nome ), equipe_id')
+    .neq('origem', 'Vistoria')
+    .neq('status', 'cancelada')
+    .not('latitude', 'is', null)
+    .not('longitude', 'is', null);
+  if (filtro?.equipeId) query = query.eq('equipe_id', filtro.equipeId);
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return (data ?? []).map((o) => {
+    const row = o as typeof o & { equipe?: { nome: string } | null; tecnico?: { nome: string } | null };
+    return {
+      id: row.id,
+      numero: row.numero,
+      tipo: row.tipo,
+      origem: row.origem,
+      prioridade: row.prioridade,
+      status: row.status,
+      latitude: row.latitude as number,
+      longitude: row.longitude as number,
+      municipio: row.municipio,
+      bairro: row.bairro,
+      endereco: row.endereco,
+      equipe: row.equipe?.nome ?? null,
+      tecnico: row.tecnico?.nome ?? null,
+      createdAt: row.created_at,
+      cor: corDaOrdem(row.status),
     };
   });
 }

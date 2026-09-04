@@ -1,17 +1,16 @@
 import { useMemo, useState } from 'react';
 import { X, Loader2, FileSpreadsheet, Globe, Package } from 'lucide-react';
-import { exportarPendencias, type FormatoExportacao } from '@/lib/vistoriaExport';
-import type { PendenciaBacklog } from '@/types/vistoria';
+import { exportarPendencias, type FormatoExportacao, type PontoExportavel } from '@/lib/vistoriaExport';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
 export type EscopoExportacao = 'todos' | 'atividade' | 'selecionados';
 
 interface ExportarPendenciasModalProps {
-  /** Universo já visível na tela (respeitando o filtro de equipe) — o recorte é aplicado sobre isto. */
-  pendencias: PendenciaBacklog[];
+  /** Universo já visível na tela (respeitando equipe e origem) — o recorte é aplicado sobre isto. */
+  pendencias: PontoExportavel[];
   /** Pontos marcados pelo polígono; vazio quando não há seleção. */
-  selecionadas: PendenciaBacklog[];
+  selecionadas: PontoExportavel[];
   /** Recorte inicial — a tela abre já em "selecionados" quando existe seleção. */
   escopoInicial?: EscopoExportacao;
   onClose: () => void;
@@ -33,26 +32,22 @@ export function ExportarPendenciasModal({
   const [rotaId, setRotaId] = useState('');
   const [exportando, setExportando] = useState(false);
 
-  // "Atividade" = a rota de vistoria. Lista só as que têm ponto no que está
-  // visível, pra não oferecer recorte que resultaria em arquivo vazio.
+  // "Atividade" = a rota de vistoria, agrupada pelo número (VST-…). Só faz
+  // sentido pros pontos de vistoria: cada OS de manutenção é um ponto único,
+  // então agrupá-las produziria uma lista com um item por ponto.
   const atividades = useMemo(() => {
-    const mapa = new Map<string, { id: string; numero: string; titulo?: string; total: number }>();
-    pendencias.forEach((p) => {
-      const atual = mapa.get(p.ordemVistoriaId);
+    const mapa = new Map<string, { referencia: string; titulo: string; total: number }>();
+    pendencias.filter((p) => p.origemPonto === 'vistoria').forEach((p) => {
+      const atual = mapa.get(p.referencia);
       if (atual) atual.total += 1;
-      else mapa.set(p.ordemVistoriaId, {
-        id: p.ordemVistoriaId,
-        numero: p.ordemVistoriaNumero,
-        titulo: p.ordemVistoriaTitulo,
-        total: 1,
-      });
+      else mapa.set(p.referencia, { referencia: p.referencia, titulo: p.atividade, total: 1 });
     });
-    return Array.from(mapa.values()).sort((a, b) => a.numero.localeCompare(b.numero));
+    return Array.from(mapa.values()).sort((a, b) => a.referencia.localeCompare(b.referencia));
   }, [pendencias]);
 
   const alvo = useMemo(() => {
     if (escopo === 'selecionados') return selecionadas;
-    if (escopo === 'atividade') return rotaId ? pendencias.filter((p) => p.ordemVistoriaId === rotaId) : [];
+    if (escopo === 'atividade') return rotaId ? pendencias.filter((p) => p.referencia === rotaId) : [];
     return pendencias;
   }, [escopo, selecionadas, pendencias, rotaId]);
 
@@ -60,10 +55,9 @@ export function ExportarPendenciasModal({
     if (alvo.length === 0) return;
     setExportando(true);
     try {
-      const sufixo = escopo === 'atividade'
-        ? (atividades.find((a) => a.id === rotaId)?.numero ?? 'atividade')
+      const sufixo = escopo === 'atividade' ? (rotaId || 'atividade')
         : escopo === 'selecionados' ? 'selecionados' : 'todos';
-      await exportarPendencias(alvo, formato, `pontos-vistoria-${sufixo}`);
+      await exportarPendencias(alvo, formato, `pontos-backlog-${sufixo}`);
       toast({ title: `${alvo.length} ponto(s) exportado(s)` });
       onClose();
     } catch (err) {
@@ -146,8 +140,8 @@ export function ExportarPendenciasModal({
               >
                 <option value="">Selecione a atividade</option>
                 {atividades.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.numero}{a.titulo ? ` — ${a.titulo}` : ''} ({a.total})
+                  <option key={a.referencia} value={a.referencia}>
+                    {a.referencia}{a.titulo ? ` — ${a.titulo}` : ''} ({a.total})
                   </option>
                 ))}
               </select>

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Search, Plus, MapPin, ChevronDown, Loader2, UserPlus, MoreVertical,
   Pencil, Copy, FileDown, Ban, Paperclip, X, Sheet, ArrowRight, BellRing,
-  AlertTriangle, ThumbsUp, CheckSquare, Square,
+  AlertTriangle, ThumbsUp, CheckSquare, Square, ListChecks,
 } from 'lucide-react';
 import {
   listManutencaoOrders, assignTecnico, duplicarOrdemManutencao, cancelarOrdem,
@@ -74,6 +74,7 @@ const GRUPO_LABEL: Record<Exclude<Grupo, null>, string> = {
 interface Filtros {
   numero: string;
   referenciaExterna: string;
+  uf: string;
   cidade: string;
   bairro: string;
   tecnico: string;
@@ -83,25 +84,42 @@ interface Filtros {
   tipo: string;
   dataInicial: string;
   dataFinal: string;
+  /**
+   * Recorte por delegação. 'todas' NÃO exclui nada — inclusive as OS ainda
+   * sem técnico, que é o padrão e o que "exportar tudo" deve levar. Fica num
+   * filtro próprio porque "não delegada" não é um status: é a ausência de
+   * `tecnico_id`, e antes só dava pra chegar nelas indiretamente, pelo status
+   * 'aberta'.
+   */
+  delegacao: 'todas' | 'nao_delegadas' | 'delegadas';
   /** Vindos de um deep-link do dashboard — ver leitura de query params abaixo. */
   grupo: Grupo;
   vencidas: boolean;
 }
 
 const FILTROS_VAZIOS: Filtros = {
-  numero: '', referenciaExterna: '', cidade: '', bairro: '', tecnico: '', equipe: '',
+  numero: '', referenciaExterna: '', uf: '', cidade: '', bairro: '', tecnico: '', equipe: '',
   status: 'todas', prioridade: 'todas', tipo: '', dataInicial: '', dataFinal: '',
-  grupo: null, vencidas: false,
+  delegacao: 'todas', grupo: null, vencidas: false,
 };
 
-/** Lê os filtros iniciais da URL (?status=, ?prioridade=, ?grupo=, ?vencidas=1) — usado só uma vez, ao montar. */
-function filtrosIniciais(): Filtros {
-  const params = new URLSearchParams(window.location.search);
+/**
+ * Traduz a query string em filtros (?status=, ?prioridade=, ?grupo=,
+ * ?vencidas=1). Recebe a search como argumento — e não lê `window.location`
+ * direto — porque precisa ser reavaliada a cada navegação, não só na montagem
+ * (ver o efeito de sincronização em ManutencaoOrdersList).
+ */
+function filtrosIniciais(search = window.location.search): Filtros {
+  const params = new URLSearchParams(search);
   const status = params.get('status');
   const prioridade = params.get('prioridade');
   const grupo = params.get('grupo');
+  const delegacao = params.get('delegacao');
   return {
     ...FILTROS_VAZIOS,
+    // Deep-link por estado — permite mandar "as OS de MG" pra alguém por link.
+    uf: (params.get('uf') ?? '').toUpperCase(),
+    delegacao: delegacao === 'nao_delegadas' || delegacao === 'delegadas' ? delegacao : 'todas',
     status: status && status in STATUS_LABEL ? (status as StatusOS) : 'todas',
     prioridade: prioridade && prioridade in PRIORIDADE_LABEL ? (prioridade as PrioridadeOS) : 'todas',
     grupo: grupo && ['abertas', 'andamento', 'concluidas', 'prioridade_alta'].includes(grupo) ? (grupo as Grupo) : null,
@@ -111,6 +129,7 @@ function filtrosIniciais(): Filtros {
 
 export default function ManutencaoOrdersList() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { canManageOrders, isTecnicoManutencao, profile } = useAuth();
   const [orders, setOrders] = useState<ManutencaoOrdem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,6 +144,21 @@ export default function ManutencaoOrdersList() {
   const [processando, setProcessando] = useState<string | null>(null);
   const [exportando, setExportando] = useState(false);
   const [selecaoDelegar, setSelecaoDelegar] = useState<Set<string>>(new Set());
+
+  /**
+   * Refaz os filtros a cada mudança de query string. Sem isto, o estado
+   * inicial (lido só na montagem) sobrevivia à navegação: vir do dashboard
+   * por "?grupo=andamento" e depois clicar em "Ordens de Manutenção" na barra
+   * lateral limpava a URL mas NÃO o filtro — o React Router não remonta o
+   * componente quando só a search muda. O usuário via a tela como "sem
+   * filtro" e exportava um recorte, sem as OS ainda não delegadas.
+   *
+   * Só depende de `location.search`: filtros digitados na tela não mexem na
+   * URL, então nada aqui sobrescreve o que o usuário acabou de escolher.
+   */
+  useEffect(() => {
+    setFiltros(filtrosIniciais(location.search));
+  }, [location.search]);
 
   const carregar = useCallback((silencioso = false) => {
     if (!silencioso) setLoading(true);
@@ -172,17 +206,25 @@ export default function ManutencaoOrdersList() {
   );
 
   const opcoes = useMemo(() => ({
-    cidades: distinctSorted(ordersEscopo.map((o) => o.municipio)),
+    // Normaliza na leitura também: OS gravadas antes do seletor existir podem
+    // ter a sigla em minúscula, e sem isso apareceriam como opção duplicada.
+    ufs: distinctSorted(ordersEscopo.map((o) => o.uf?.toUpperCase())),
+    // Cidades e bairros acompanham a UF escolhida — sem isso o gestor filtra
+    // por estado e continua vendo a lista de cidades do país inteiro.
+    cidades: distinctSorted(
+      ordersEscopo.filter((o) => !filtros.uf || (o.uf ?? '').toUpperCase() === filtros.uf).map((o) => o.municipio),
+    ),
     bairros: distinctSorted(ordersEscopo.map((o) => o.bairro)),
     tecnicos: distinctSorted(ordersEscopo.map((o) => o.tecnico)),
     equipes: distinctSorted(ordersEscopo.map((o) => o.equipe)),
     tipos: distinctSorted(ordersEscopo.map((o) => o.tipo)),
-  }), [ordersEscopo]);
+  }), [ordersEscopo, filtros.uf]);
 
   const filtered = useMemo(() => {
     return ordersEscopo.filter((o) => {
       if (filtros.numero.trim() && !o.numero.toLowerCase().includes(filtros.numero.trim().toLowerCase())) return false;
       if (filtros.referenciaExterna.trim() && !(o.referenciaExterna ?? '').toLowerCase().includes(filtros.referenciaExterna.trim().toLowerCase())) return false;
+      if (filtros.uf && (o.uf ?? '').toUpperCase() !== filtros.uf) return false;
       if (filtros.cidade && o.municipio !== filtros.cidade) return false;
       if (filtros.bairro && o.bairro !== filtros.bairro) return false;
       if (filtros.tecnico && o.tecnico !== filtros.tecnico) return false;
@@ -190,6 +232,10 @@ export default function ManutencaoOrdersList() {
       if (filtros.status !== 'todas' && o.status !== filtros.status) return false;
       if (filtros.prioridade !== 'todas' && o.prioridade !== filtros.prioridade) return false;
       if (filtros.tipo && o.tipo !== filtros.tipo) return false;
+      // Ausência de técnico é o que define "não delegada" — status 'aberta'
+      // seria proxy frágil (uma OS reaberta volta a ter técnico).
+      if (filtros.delegacao === 'nao_delegadas' && o.tecnicoId) return false;
+      if (filtros.delegacao === 'delegadas' && !o.tecnicoId) return false;
       if (filtros.dataInicial && o.createdAt < filtros.dataInicial) return false;
       if (filtros.dataFinal && o.createdAt > `${filtros.dataFinal}T23:59:59`) return false;
       if (filtros.grupo === 'prioridade_alta') {
@@ -203,6 +249,9 @@ export default function ManutencaoOrdersList() {
   }, [ordersEscopo, filtros]);
 
   const filtrosAtivos = Object.entries(filtros).some(([k, v]) => v !== (FILTROS_VAZIOS as any)[k]);
+
+  /** Quantas do que vai ser exportado ainda não têm técnico — sai no tooltip do botão pra confirmar sem abrir a planilha. */
+  const naoDelegadasNoExport = useMemo(() => filtered.filter((o) => !o.tecnicoId).length, [filtered]);
 
   const handleNovaOS = () => {
     navigate('/manutencao/nova');
@@ -219,6 +268,7 @@ export default function ManutencaoOrdersList() {
           { header: 'Status', key: 'status', width: 20 },
           { header: 'Prioridade', key: 'prioridade', width: 12 },
           { header: 'Solicitante', key: 'solicitante', width: 22 },
+          { header: 'UF', key: 'uf', width: 8 },
           { header: 'Cidade', key: 'cidade', width: 18 },
           { header: 'Bairro', key: 'bairro', width: 18 },
           { header: 'Endereço', key: 'endereco', width: 30 },
@@ -234,6 +284,7 @@ export default function ManutencaoOrdersList() {
           status: STATUS_LABEL[o.status],
           prioridade: PRIORIDADE_LABEL[o.prioridade],
           solicitante: o.solicitante,
+          uf: (o.uf ?? '').toUpperCase(),
           cidade: o.municipio ?? '',
           bairro: o.bairro ?? '',
           endereco: `${o.endereco ?? ''}${o.numeroEndereco ? `, ${o.numeroEndereco}` : ''}`,
@@ -362,9 +413,23 @@ export default function ManutencaoOrdersList() {
             <button
               onClick={handleExportarExcel}
               disabled={exportando}
+              title={filtrosAtivos
+                ? `Exporta as ${filtered.length} OS que passam pelos filtros (de ${ordersEscopo.length} no total) — ${naoDelegadasNoExport} sem técnico`
+                : `Exporta todas as ${filtered.length} OS, incluindo as ${naoDelegadasNoExport} ainda não delegadas`}
               className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm font-bold px-3.5 py-2.5 rounded-xl transition-colors disabled:opacity-60"
             >
               {exportando ? <Loader2 className="icon-md animate-spin" /> : <Sheet className="icon-md" />} Excel
+              {/* A contagem no proprio botao — sem isso, exportar um recorte
+                  achando que era tudo so aparecia depois de abrir a planilha. */}
+              <span className={cn(
+                'text-[10px] font-black px-1.5 py-0.5 rounded-full',
+                filtrosAtivos
+                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500',
+              )}
+              >
+                {filtered.length}
+              </span>
             </button>
             <button
               onClick={handleNovaOS}
@@ -375,6 +440,128 @@ export default function ManutencaoOrdersList() {
           </div>
         }
       />
+
+      {/* Busca rápida + toggle de filtros avançados */}
+      <div className="flex flex-wrap gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="icon-sm absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={filtros.numero}
+            onChange={(e) => setFiltro('numero', e.target.value)}
+            placeholder="Buscar por número da OS..."
+            className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+        <button
+          onClick={() => setMostrarFiltros((v) => !v)}
+          className={cn(
+            'flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-bold border transition-colors',
+            filtrosAtivos
+              ? 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
+              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
+          )}
+        >
+          Filtros {filtrosAtivos && `(${Object.entries(filtros).filter(([k, v]) => v !== (FILTROS_VAZIOS as any)[k]).length})`}
+          <ChevronDown className={cn('icon-sm transition-transform', mostrarFiltros && 'rotate-180')} />
+        </button>
+        <button
+          onClick={() => setFiltro('vencidas', !filtros.vencidas)}
+          title="Mostrar só OS com prazo vencido"
+          className={cn(
+            'flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-sm font-bold border transition-colors',
+            filtros.vencidas
+              ? 'border-red-400 bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
+              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
+          )}
+        >
+          <AlertTriangle className="icon-sm" /> Vencidas
+        </button>
+        {filtrosAtivos && (
+          <button
+            onClick={() => setFiltros(FILTROS_VAZIOS)}
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          >
+            <X className="icon-sm" /> Limpar
+          </button>
+        )}
+      </div>
+
+      {/* Recorte vindo de um clique nos cards do dashboard — sem isso, o
+          gestor chegava numa lista pré-filtrada sem entender por quê. */}
+      {filtros.grupo && (
+        <div className="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-xl px-3 py-2 w-fit">
+          Filtro do dashboard: {GRUPO_LABEL[filtros.grupo]}
+          <button onClick={() => setFiltro('grupo', null)} aria-label="Remover filtro" className="hover:text-amber-900 dark:hover:text-amber-200">
+            <X className="icon-sm" />
+          </button>
+        </div>
+      )}
+
+      {mostrarFiltros && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Trocar de estado zera a cidade: manter uma cidade de outra UF
+              selecionada devolveria lista vazia sem explicar por quê. */}
+          <select
+            value={filtros.uf}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, uf: e.target.value, cidade: '' }))}
+            className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+          >
+            <option value="">Estado (todos)</option>
+            {opcoes.ufs.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+          <select value={filtros.cidade} onChange={(e) => setFiltro('cidade', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="">Cidade (todas)</option>
+            {opcoes.cidades.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={filtros.bairro} onChange={(e) => setFiltro('bairro', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="">Bairro (todos)</option>
+            {opcoes.bairros.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+          {canManageOrders && (
+            <select value={filtros.tecnico} onChange={(e) => setFiltro('tecnico', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+              <option value="">Técnico (todos)</option>
+              {opcoes.tecnicos.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+          <select value={filtros.equipe} onChange={(e) => setFiltro('equipe', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="">Equipe (todas)</option>
+            {opcoes.equipes.map((e) => <option key={e} value={e}>{e}</option>)}
+          </select>
+          {canManageOrders && (
+            <select
+              value={filtros.delegacao}
+              onChange={(e) => setFiltro('delegacao', e.target.value as Filtros['delegacao'])}
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+            >
+              <option value="todas">Delegação (todas)</option>
+              <option value="nao_delegadas">Somente não delegadas</option>
+              <option value="delegadas">Somente delegadas</option>
+            </select>
+          )}
+          <select value={filtros.status} onChange={(e) => setFiltro('status', e.target.value as StatusOS | 'todas')} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="todas">Status (todos)</option>
+            {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <select value={filtros.prioridade} onChange={(e) => setFiltro('prioridade', e.target.value as PrioridadeOS | 'todas')} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="todas">Prioridade (todas)</option>
+            {Object.entries(PRIORIDADE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <select value={filtros.tipo} onChange={(e) => setFiltro('tipo', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+            <option value="">Tipo de serviço (todos)</option>
+            {opcoes.tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <input
+            value={filtros.referenciaExterna}
+            onChange={(e) => setFiltro('referenciaExterna', e.target.value)}
+            placeholder="OS Aniel"
+            className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+          />
+          <div className="flex gap-2 col-span-2 md:col-span-1">
+            <input type="date" value={filtros.dataInicial} onChange={(e) => setFiltro('dataInicial', e.target.value)} className="w-full px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" title="Data inicial" />
+            <input type="date" value={filtros.dataFinal} onChange={(e) => setFiltro('dataFinal', e.target.value)} className="w-full px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" title="Data final" />
+          </div>
+        </div>
+      )}
 
       {/* Fila de atribuição — só supervisor/gestor vê isso. Seleção múltipla
           permite delegar várias OS pro mesmo técnico numa única confirmação. */}
@@ -388,6 +575,14 @@ export default function ManutencaoOrdersList() {
               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 dark:bg-amber-800/40 dark:text-amber-300">
                 {filaAtribuicao.length}
               </span>
+              {/* Caminho direto pro recorte: a fila mostra as sem técnico,
+                  mas só a lista/exportação abaixo consegue trabalhar com elas. */}
+              <button
+                onClick={() => { setFiltros({ ...FILTROS_VAZIOS, delegacao: 'nao_delegadas' }); setMostrarFiltros(true); }}
+                className="text-xs font-bold text-amber-700 dark:text-amber-400 hover:underline"
+              >
+                Filtrar não delegadas
+              </button>
               {selecaoDelegar.size > 0 && (
                 <button
                   onClick={() => setOrdensParaDelegar(filaAtribuicao.filter((o) => selecaoDelegar.has(o.id)))}
@@ -398,7 +593,12 @@ export default function ManutencaoOrdersList() {
               )}
             </div>
           </div>
-          <div className="space-y-2">
+          {/* Rolagem própria: com a fila cheia (18 itens medem ~1300px) ela
+              ocupava mais que uma tela inteira, e a lista principal só
+              aparecia depois de rolar tudo — o fim da fila ficava invisível.
+              Limitada, o bloco inteiro cabe na tela e o que vem depois dela
+              fica evidente. */}
+          <div className="space-y-2 max-h-[22rem] overflow-y-auto pr-1">
             {filaAtribuicao.map((o) => (
               <div
                 key={o.id}
@@ -514,104 +714,27 @@ export default function ManutencaoOrdersList() {
         </div>
       )}
 
-      {/* Busca rápida + toggle de filtros avançados */}
-      <div className="flex flex-wrap gap-2">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="icon-sm absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            value={filtros.numero}
-            onChange={(e) => setFiltro('numero', e.target.value)}
-            placeholder="Buscar por número da OS..."
-            className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-          />
-        </div>
-        <button
-          onClick={() => setMostrarFiltros((v) => !v)}
-          className={cn(
-            'flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-bold border transition-colors',
-            filtrosAtivos
-              ? 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
-              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
+      {/* Corte explícito entre as duas metades da tela: acima ficam as FILAS
+          DE AÇÃO (delegar, conferir finalizadas), que são recortes pequenos e
+          temporários; daqui pra baixo é a lista completa. Sem essa marcação as
+          duas coisas viravam um scroll contínuo e dava pra confundir a fila
+          com a lista — ainda mais agora que os filtros subiram e afastaram o
+          topo da tabela. */}
+      {!loading && (
+        <div className="flex items-center gap-3 pt-1">
+          <h2 className="shrink-0 text-sm font-black text-slate-700 dark:text-slate-200 flex items-center gap-2">
+            <ListChecks className="icon-md text-slate-400" />
+            Ordens em atividade
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">
+              {filtered.length}
+            </span>
+          </h2>
+          <div className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+          {filtrosAtivos && (
+            <span className="shrink-0 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+              filtro aplicado
+            </span>
           )}
-        >
-          Filtros {filtrosAtivos && `(${Object.entries(filtros).filter(([k, v]) => v !== (FILTROS_VAZIOS as any)[k]).length})`}
-          <ChevronDown className={cn('icon-sm transition-transform', mostrarFiltros && 'rotate-180')} />
-        </button>
-        <button
-          onClick={() => setFiltro('vencidas', !filtros.vencidas)}
-          title="Mostrar só OS com prazo vencido"
-          className={cn(
-            'flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-sm font-bold border transition-colors',
-            filtros.vencidas
-              ? 'border-red-400 bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
-              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
-          )}
-        >
-          <AlertTriangle className="icon-sm" /> Vencidas
-        </button>
-        {filtrosAtivos && (
-          <button
-            onClick={() => setFiltros(FILTROS_VAZIOS)}
-            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-          >
-            <X className="icon-sm" /> Limpar
-          </button>
-        )}
-      </div>
-
-      {/* Recorte vindo de um clique nos cards do dashboard — sem isso, o
-          gestor chegava numa lista pré-filtrada sem entender por quê. */}
-      {filtros.grupo && (
-        <div className="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-xl px-3 py-2 w-fit">
-          Filtro do dashboard: {GRUPO_LABEL[filtros.grupo]}
-          <button onClick={() => setFiltro('grupo', null)} aria-label="Remover filtro" className="hover:text-amber-900 dark:hover:text-amber-200">
-            <X className="icon-sm" />
-          </button>
-        </div>
-      )}
-
-      {mostrarFiltros && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-          <select value={filtros.cidade} onChange={(e) => setFiltro('cidade', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-            <option value="">Cidade (todas)</option>
-            {opcoes.cidades.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select value={filtros.bairro} onChange={(e) => setFiltro('bairro', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-            <option value="">Bairro (todos)</option>
-            {opcoes.bairros.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
-          {canManageOrders && (
-            <select value={filtros.tecnico} onChange={(e) => setFiltro('tecnico', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-              <option value="">Técnico (todos)</option>
-              {opcoes.tecnicos.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          )}
-          <select value={filtros.equipe} onChange={(e) => setFiltro('equipe', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-            <option value="">Equipe (todas)</option>
-            {opcoes.equipes.map((e) => <option key={e} value={e}>{e}</option>)}
-          </select>
-          <select value={filtros.status} onChange={(e) => setFiltro('status', e.target.value as StatusOS | 'todas')} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-            <option value="todas">Status (todos)</option>
-            {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-          <select value={filtros.prioridade} onChange={(e) => setFiltro('prioridade', e.target.value as PrioridadeOS | 'todas')} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-            <option value="todas">Prioridade (todas)</option>
-            {Object.entries(PRIORIDADE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-          <select value={filtros.tipo} onChange={(e) => setFiltro('tipo', e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-            <option value="">Tipo de serviço (todos)</option>
-            {opcoes.tipos.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <input
-            value={filtros.referenciaExterna}
-            onChange={(e) => setFiltro('referenciaExterna', e.target.value)}
-            placeholder="OS Aniel"
-            className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-          />
-          <div className="flex gap-2 col-span-2 md:col-span-1">
-            <input type="date" value={filtros.dataInicial} onChange={(e) => setFiltro('dataInicial', e.target.value)} className="w-full px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" title="Data inicial" />
-            <input type="date" value={filtros.dataFinal} onChange={(e) => setFiltro('dataFinal', e.target.value)} className="w-full px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800" title="Data final" />
-          </div>
         </div>
       )}
 

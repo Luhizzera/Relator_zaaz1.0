@@ -10,10 +10,11 @@ import { GerarCorretivaModal } from '@/components/GerarCorretivaModal';
 import { ExportarPendenciasModal, type EscopoExportacao } from '@/components/ExportarPendenciasModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
-import { listPendenciasBacklog } from '@/lib/vistoriaService';
+import { listPendenciasBacklog, listOrdensBacklog } from '@/lib/vistoriaService';
+import { pendenciaParaPonto, ordemParaPonto, type PontoExportavel } from '@/lib/vistoriaExport';
 import { listEquipes, listEquipesDoSupervisor } from '@/lib/manutencaoService';
 import { EquipeRow } from '@/lib/supabaseClient';
-import { PendenciaBacklog, CorPendencia } from '@/types/vistoria';
+import { PendenciaBacklog, OrdemBacklog, CorPendencia, OrigemPonto } from '@/types/vistoria';
 import { pontoDentroDoPoligono, type Vertice } from '@/lib/geoSelecao';
 import { cn } from '@/lib/utils';
 
@@ -39,16 +40,27 @@ const COR_LABEL: Record<CorPendencia, string> = {
   verde: 'OS concluída',
 };
 
-function pinIcon(cor: CorPendencia, selecionado: boolean) {
+/**
+ * A FORMA diz a origem, a COR diz a situação — dois canais independentes, pra
+ * o mapa responder "de onde veio?" e "precisa de ação?" sem legenda cruzada.
+ *
+ *   círculo  → pendência de vistoria
+ *   quadrado → OS aberta direto na manutenção
+ */
+function pinIcon(cor: CorPendencia, origem: OrigemPonto, selecionado: boolean) {
   // O ponto selecionado cresce e ganha anel — precisa ser distinguível de
   // relance mesmo num aglomerado denso, que é o caso de uso do polígono.
   const tamanho = selecionado ? 30 : 22;
   const anel = selecionado
     ? 'box-shadow:0 0 0 4px rgba(14,165,233,0.85), 0 1px 6px rgba(0,0,0,0.45);'
     : 'box-shadow:0 1px 4px rgba(0,0,0,0.4);';
+  // 3px no quadrado em vez de canto vivo: a 22px o canto reto vira serrilha e
+  // some a diferença; um raio pequeno mantém a silhueta legível sem virar
+  // círculo.
+  const raio = origem === 'vistoria' ? '9999px' : '3px';
   return L.divIcon({
     className: '',
-    html: `<div style="width:${tamanho}px;height:${tamanho}px;border-radius:9999px;background:${COR_HEX[cor]};border:3px solid white;${anel}"></div>`,
+    html: `<div style="width:${tamanho}px;height:${tamanho}px;border-radius:${raio};background:${COR_HEX[cor]};border:3px solid white;${anel}"></div>`,
     iconSize: [tamanho, tamanho],
     iconAnchor: [tamanho / 2, tamanho / 2],
   });
@@ -93,6 +105,8 @@ export default function VistoriaBacklogMap() {
   const navigate = useNavigate();
   const { canManageOrders, isGestor, profile } = useAuth();
   const [pendencias, setPendencias] = useState<PendenciaBacklog[]>([]);
+  const [ordens, setOrdens] = useState<OrdemBacklog[]>([]);
+  const [origem, setOrigem] = useState<OrigemPonto | 'todas'>('todas');
   const [equipes, setEquipes] = useState<EquipeRow[]>([]);
   const [equipeId, setEquipeId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -116,14 +130,17 @@ export default function VistoriaBacklogMap() {
 
   const carregar = () => {
     setLoading(true);
-    listPendenciasBacklog(equipeId ? { equipeId } : undefined)
-      .then(setPendencias)
+    const filtro = equipeId ? { equipeId } : undefined;
+    Promise.all([listPendenciasBacklog(filtro), listOrdensBacklog(filtro)])
+      .then(([p, o]) => { setPendencias(p); setOrdens(o); })
       .catch((err) => console.error('[Vistoria] Erro ao carregar backlog:', err))
       .finally(() => setLoading(false));
   };
 
   useEffect(carregar, [equipeId]);
-  useRealtimeRefresh([{ table: 'pendencias_vistoria' }], carregar);
+  // Escuta as duas tabelas: uma OS aberta agora precisa aparecer no mapa sem F5,
+  // do mesmo jeito que uma pendência registrada em campo já aparecia.
+  useRealtimeRefresh([{ table: 'pendencias_vistoria' }, { table: 'ordens_manutencao' }], carregar);
 
   const limparPoligono = useCallback(() => {
     setVertices([]);
@@ -182,22 +199,59 @@ export default function VistoriaBacklogMap() {
     setDesenhando(true);
   };
 
+  // Camadas visíveis conforme o filtro de origem. Tudo abaixo — legenda,
+  // seleção por polígono, exportação — trabalha sobre estes dois recortes, pra
+  // que o filtro valha para o mapa E para o que sai dele.
+  const pendenciasVisiveis = useMemo(
+    () => (origem === 'manutencao' ? [] : pendencias),
+    [pendencias, origem],
+  );
+  const ordensVisiveis = useMemo(
+    () => (origem === 'vistoria' ? [] : ordens),
+    [ordens, origem],
+  );
+
   const contagem = useMemo(() => {
     const c: Record<CorPendencia, number> = { vermelho: 0, laranja: 0, verde: 0 };
-    pendencias.forEach((p) => { c[p.cor] += 1; });
+    pendenciasVisiveis.forEach((p) => { c[p.cor] += 1; });
+    ordensVisiveis.forEach((o) => { c[o.cor] += 1; });
     return c;
-  }, [pendencias]);
+  }, [pendenciasVisiveis, ordensVisiveis]);
 
-  const selecionadas = useMemo(
-    () => (vertices.length < 3 ? [] : pendencias.filter((p) => pontoDentroDoPoligono(p.latitude, p.longitude, vertices))),
-    [pendencias, vertices],
+  const dentro = (lat: number, lng: number) => pontoDentroDoPoligono(lat, lng, vertices);
+
+  const pendenciasSelecionadas = useMemo(
+    () => (vertices.length < 3 ? [] : pendenciasVisiveis.filter((p) => dentro(p.latitude, p.longitude))),
+    [pendenciasVisiveis, vertices],
   );
-  const idsSelecionados = useMemo(() => new Set(selecionadas.map((p) => p.id)), [selecionadas]);
+  const ordensSelecionadas = useMemo(
+    () => (vertices.length < 3 ? [] : ordensVisiveis.filter((o) => dentro(o.latitude, o.longitude))),
+    [ordensVisiveis, vertices],
+  );
+
+  const idsSelecionados = useMemo(
+    () => new Set([...pendenciasSelecionadas, ...ordensSelecionadas].map((x) => x.id)),
+    [pendenciasSelecionadas, ordensSelecionadas],
+  );
+
+  // Converte pra forma comum só na fronteira com a exportação — o mapa segue
+  // trabalhando com os dois tipos nativos, que carregam o que ele precisa
+  // (ordemCorretivaId pra navegar, cor pra pintar).
+  const pontosVisiveis = useMemo<PontoExportavel[]>(
+    () => [...pendenciasVisiveis.map(pendenciaParaPonto), ...ordensVisiveis.map(ordemParaPonto)],
+    [pendenciasVisiveis, ordensVisiveis],
+  );
+  const pontosSelecionados = useMemo<PontoExportavel[]>(
+    () => [...pendenciasSelecionadas.map(pendenciaParaPonto), ...ordensSelecionadas.map(ordemParaPonto)],
+    [pendenciasSelecionadas, ordensSelecionadas],
+  );
+  const totalSelecionado = pontosSelecionados.length;
 
   const center = useMemo<[number, number]>(() => {
-    if (pendencias.length === 0) return [-23.3868, -47.9528];
-    return [pendencias[0].latitude, pendencias[0].longitude];
-  }, [pendencias]);
+    const primeiro = pendencias[0] ?? ordens[0];
+    if (!primeiro) return [-23.3868, -47.9528];
+    return [primeiro.latitude, primeiro.longitude];
+  }, [pendencias, ordens]);
 
   const handlePinClick = (p: PendenciaBacklog) => {
     // Durante o desenho o clique pertence ao polígono, não ao pino — senão
@@ -208,6 +262,13 @@ export default function VistoriaBacklogMap() {
     } else if (p.ordemCorretivaId) {
       navigate(`/manutencao/ordens/${p.ordemCorretivaId}`);
     }
+  };
+
+  // OS de manutenção não tem etapa de "gerar corretiva" — ela já É a OS, então
+  // o clique vai direto pro detalhe, onde estão progresso, fotos e atividades.
+  const handleOrdemClick = (o: OrdemBacklog) => {
+    if (desenhando) return;
+    navigate(`/manutencao/ordens/${o.id}`);
   };
 
   if (!canManageOrders) return null;
@@ -235,7 +296,7 @@ export default function VistoriaBacklogMap() {
 
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => setExportando(selecionadas.length > 0 ? 'selecionados' : 'todos')}
+          onClick={() => setExportando(totalSelecionado > 0 ? 'selecionados' : 'todos')}
           className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold px-3 py-2 rounded-xl transition-colors"
         >
           <Download className="icon-sm" /> Exportar
@@ -248,6 +309,16 @@ export default function VistoriaBacklogMap() {
         >
           <option value="">Todas as equipes</option>
           {equipes.map((eq) => <option key={eq.id} value={eq.id}>{eq.nome}</option>)}
+        </select>
+
+        <select
+          value={origem}
+          onChange={(e) => setOrigem(e.target.value as OrigemPonto | 'todas')}
+          className="px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+        >
+          <option value="todas">Origem (todas)</option>
+          <option value="vistoria">Vistoria ({pendencias.length})</option>
+          <option value="manutencao">Manutenção ({ordens.length})</option>
         </select>
 
         <button
@@ -272,6 +343,16 @@ export default function VistoriaBacklogMap() {
               {COR_LABEL[cor]} ({contagem[cor]})
             </span>
           ))}
+          {/* Segunda chave de leitura: a cor diz a situação, a forma diz a
+              origem. Sem isto o quadrado seria só um pino estranho. */}
+          <span className="flex items-center gap-3 pl-3 border-l border-slate-200 dark:border-slate-700">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-400" /> Vistoria
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-[2px] bg-slate-400" /> Manutenção
+            </span>
+          </span>
         </div>
       </div>
 
@@ -328,12 +409,21 @@ export default function VistoriaBacklogMap() {
                 />
               ))}
 
-              {pendencias.map((p) => (
+              {pendenciasVisiveis.map((p) => (
                 <Marker
                   key={p.id}
                   position={[p.latitude, p.longitude]}
-                  icon={pinIcon(p.cor, idsSelecionados.has(p.id))}
+                  icon={pinIcon(p.cor, 'vistoria', idsSelecionados.has(p.id))}
                   eventHandlers={{ click: () => handlePinClick(p) }}
+                />
+              ))}
+
+              {ordensVisiveis.map((o) => (
+                <Marker
+                  key={o.id}
+                  position={[o.latitude, o.longitude]}
+                  icon={pinIcon(o.cor, 'manutencao', idsSelecionados.has(o.id))}
+                  eventHandlers={{ click: () => handleOrdemClick(o) }}
                 />
               ))}
             </MapContainer>
@@ -341,10 +431,10 @@ export default function VistoriaBacklogMap() {
 
           {/* Barra de ação da seleção — aparece só quando há pontos dentro do
               polígono, que é o gatilho pra exportação do recorte. */}
-          {selecionadas.length > 0 && (
+          {totalSelecionado > 0 && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[500] flex items-center gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl px-4 py-2.5">
               <span className="text-sm font-black text-slate-800 dark:text-slate-100">
-                {selecionadas.length} ponto(s) selecionado(s)
+                {totalSelecionado} ponto(s) selecionado(s)
               </span>
               <button
                 onClick={() => setExportando('selecionados')}
@@ -374,8 +464,8 @@ export default function VistoriaBacklogMap() {
 
       {exportando && (
         <ExportarPendenciasModal
-          pendencias={pendencias}
-          selecionadas={selecionadas}
+          pendencias={pontosVisiveis}
+          selecionadas={pontosSelecionados}
           escopoInicial={exportando}
           onClose={() => setExportando(null)}
         />

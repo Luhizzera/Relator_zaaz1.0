@@ -13,6 +13,24 @@ const UF_POR_ESTADO: Record<string, string> = {
 
 export const ufFromStateName = (name?: string) => (name ? (UF_POR_ESTADO[name] ?? name) : '');
 
+/**
+ * As 27 siglas, em ordem alfabética — derivadas do mapa acima pra não existir
+ * uma segunda lista de UF que possa divergir dele. Alimenta o seletor de UF
+ * na abertura da OS: com campo livre, "SP"/"sp"/"Sp" viravam três valores
+ * distintos e o filtro por estado listaria as três como opções separadas.
+ */
+export const UFS: string[] = Object.values(UF_POR_ESTADO).sort((a, b) => a.localeCompare(b));
+
+/** Normaliza no ponto de gravação (ver createManutencaoOrder) — protege o que já foi digitado à mão antes do seletor existir. */
+export function normalizarUf(valor?: string | null): string | null {
+  if (!valor) return null;
+  const sigla = valor.trim().toUpperCase();
+  if (UFS.includes(sigla)) return sigla;
+  // Veio o nome do estado por extenso (ex: importação antiga) — converte.
+  const porNome = ufFromStateName(valor.trim());
+  return UFS.includes(porNome) ? porNome : sigla || null;
+}
+
 // Preposições que ficam em minúsculo dentro do nome (só quando não são a
 // primeira palavra) — convenção usual de topônimo em português: "São José
 // dos Campos", "Passo de Camaragibe", "Vila Velha".

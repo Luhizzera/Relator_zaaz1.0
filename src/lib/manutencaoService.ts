@@ -20,7 +20,7 @@ import type {
   UserRole,
 } from '@/lib/supabaseClient';
 import { ManutencaoOrdem, StatusOS, ChecklistItemOS, SOLUCAO_PROBLEMA_CTO } from '@/types/manutencao';
-import { normalizarNomeCidade } from '@/lib/geocoding';
+import { normalizarNomeCidade, normalizarUf } from '@/lib/geocoding';
 
 type ProfileRowLite = Pick<ProfileRow, 'id' | 'nome' | 'email' | 'ativo' | 'equipe_id'>;
 
@@ -419,7 +419,9 @@ export async function createManutencaoOrder(
     setor: partial.setor ?? null,
     responsavel_id: userId,
     responsavel_nome: partial.responsavel ?? null,
-    uf: partial.uf ?? null,
+    // Mesma razão do `municipio` logo abaixo: normalizado no ponto único de
+    // entrada, pra sigla digitada à mão não virar um valor distinto no filtro.
+    uf: normalizarUf(partial.uf),
     // Normalizado aqui — ponto único de entrada da OS no banco — pra cidade
     // digitada à mão ou vinda de geocodificação em momentos diferentes não
     // virar valores distintos no filtro (ver normalizarNomeCidade).
@@ -719,6 +721,46 @@ export async function reabrirOrdem(ordemId: string, motivo?: string): Promise<vo
     .eq('id', ordemId);
   if (error) throw error;
   await registrarHistorico(ordemId, 'OS reaberta', motivo);
+}
+
+/**
+ * Estorna uma delegação feita por engano: a OS volta pra fila de atribuição
+ * como se nunca tivesse sido delegada — status 'aberta', sem técnico e sem
+ * equipe.
+ *
+ * Diferente de `reabrirOrdem`, que é retrabalho: lá a OS continua com o mesmo
+ * técnico, que a recebe de volta pra corrigir algo. Aqui o técnico é que
+ * estava errado (ex: OS de Londrina delegada à equipe de MG), então o vínculo
+ * precisa ser desfeito pra que outro supervisor possa delegar direito.
+ *
+ * Nada do que já foi registrado é apagado — ocorrências, materiais, checklist
+ * e fotos continuam na OS. Só o vínculo some, e o histórico guarda o nome de
+ * quem estava atribuído, senão o estorno apagaria o próprio rastro do erro.
+ *
+ * O trigger `tg_ordens_manutencao_guard` (migração 0001) já cobre a permissão:
+ * mexer em tecnico_id/equipe_id exige gestor ou supervisor, e voltar pra
+ * 'aberta' não está entre os status restritos a gestor.
+ */
+export async function devolverParaFilaDeAtribuicao(ordemId: string, motivo?: string): Promise<void> {
+  // Lê antes de limpar: depois do update os nomes já se foram, e o histórico
+  // ficaria sem dizer de quem a OS foi estornada. Reaproveita getManutencaoOrder
+  // em vez de montar outro select com embeds — ele já resolve técnico e equipe.
+  const antes = await getManutencaoOrder(ordemId);
+  const tecnicoAnterior = antes?.tecnico;
+  const equipeAnterior = antes?.equipe;
+
+  const { error } = await supabase
+    .from('ordens_manutencao')
+    .update({ status: 'aberta' as StatusOS, tecnico_id: null, equipe_id: null })
+    .eq('id', ordemId);
+  if (error) throw error;
+
+  const de = [tecnicoAnterior, equipeAnterior].filter(Boolean).join(' · ');
+  await registrarHistorico(
+    ordemId,
+    'Delegação estornada',
+    [de && `Estava atribuída a ${de}.`, motivo].filter(Boolean).join(' ') || undefined,
+  );
 }
 
 export async function cancelarOrdem(ordemId: string, motivo: string): Promise<void> {

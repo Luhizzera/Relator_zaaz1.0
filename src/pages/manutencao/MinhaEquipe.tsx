@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, NavigateFunction } from 'react-router-dom';
-import { Users, Plus, X, Loader2, UserPlus, Briefcase, MapPin, Wrench, ArrowRight, ListChecks, ChevronDown } from 'lucide-react';
+import {
+  Users, Plus, X, Loader2, UserPlus, Briefcase, MapPin, Wrench, ArrowRight, ListChecks,
+  ChevronDown, Search,
+} from 'lucide-react';
 import { supabase, ProfileRow, EquipeRow, TipoEquipe, UserRole } from '@/lib/supabaseClient';
 import {
   listEquipes, listEquipesDoSupervisor, criarEquipe, definirSupervisorDaEquipe,
@@ -46,6 +49,7 @@ function EquipeCard({
   const [candidatos, setCandidatos] = useState<ProfileLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [adicionando, setAdicionando] = useState(false);
+  const [buscaCandidato, setBuscaCandidato] = useState('');
   const [processandoId, setProcessandoId] = useState<string | null>(null);
   const [mostrarAtividade, setMostrarAtividade] = useState(false);
   // Única exclusão do app que não pedia confirmação — bastava um toque
@@ -75,6 +79,14 @@ function EquipeCard({
   };
 
   useEffect(carregar, [equipe.id, role]);
+
+  // A lista continua vindo inteira — a busca só estreita o que está na tela,
+  // pra não obrigar a rolar uma lista longa procurando um nome específico.
+  const candidatosFiltrados = useMemo(() => {
+    const termo = buscaCandidato.trim().toLowerCase();
+    if (!termo) return candidatos;
+    return candidatos.filter((c) => `${c.nome} ${c.email}`.toLowerCase().includes(termo));
+  }, [candidatos, buscaCandidato]);
 
   const handleAdicionar = async (tecnicoId: string) => {
     setProcessandoId(tecnicoId);
@@ -132,8 +144,14 @@ function EquipeCard({
             onChange={(e) => handleTrocarSupervisor(e.target.value)}
             className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
           >
-            <option value="">Sem supervisor</option>
-            {supervisores.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
+            <option value="">Sem líder</option>
+            {/* O cargo vai no rótulo porque a lista agora mistura gestor e
+                supervisor — sem isso não dá pra saber quem é quem na hora de escolher. */}
+            {supervisores.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nome} — {s.role === 'gestor' ? 'Gestor' : 'Supervisor'}
+              </option>
+            ))}
           </select>
         )}
       </div>
@@ -184,10 +202,28 @@ function EquipeCard({
 
       {adicionando ? (
         <div className="space-y-2">
+          {candidatos.length > 0 && (
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                autoFocus
+                value={buscaCandidato}
+                onChange={(e) => setBuscaCandidato(e.target.value)}
+                placeholder={`Buscar entre ${candidatos.length} técnico(s)...`}
+                className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          )}
+
+          {/* Lista rolável: sem isto, uma equipe com dezenas de candidatos
+              empurra o botão "Cancelar" e o resto do card pra fora da tela. */}
+          <div className="space-y-2 max-h-64 overflow-y-auto">
           {candidatos.length === 0 ? (
             <p className="text-xs text-slate-400">Nenhum técnico sem equipe no momento.</p>
+          ) : candidatosFiltrados.length === 0 ? (
+            <p className="text-xs text-slate-400">Nenhum técnico encontrado para &quot;{buscaCandidato}&quot;.</p>
           ) : (
-            candidatos.map((c) => (
+            candidatosFiltrados.map((c) => (
               <button
                 key={c.id}
                 onClick={() => handleAdicionar(c.id)}
@@ -202,7 +238,11 @@ function EquipeCard({
               </button>
             ))
           )}
-          <button onClick={() => setAdicionando(false)} className="text-xs font-bold text-slate-400 hover:text-slate-600">
+          </div>
+          <button
+            onClick={() => { setAdicionando(false); setBuscaCandidato(''); }}
+            className="text-xs font-bold text-slate-400 hover:text-slate-600"
+          >
             Cancelar
           </button>
         </div>
@@ -311,8 +351,14 @@ export default function MinhaEquipe() {
     if (!profile) return;
     setLoading(true);
     const equipesPromise = isGestor ? listEquipes(tipo) : listEquipesDoSupervisor(profile.id, tipo);
+    // Gestor também pode liderar equipe: na prática quem coordena um contrato
+    // menor acumula os dois papéis, e antes só quem tinha `role = 'supervisor'`
+    // podia ser vinculado. Nada no banco exigia isso — `equipes.supervisor_id`
+    // é só FK pra profiles, sem constraint de cargo —, era restrição só desta
+    // consulta. Gestor primeiro na lista porque a troca costuma ser pra ele.
     const supervisoresPromise = isGestor
-      ? supabase.from('profiles').select('*').eq('role', 'supervisor').eq('ativo', true).order('nome')
+      ? supabase.from('profiles').select('*').in('role', ['gestor', 'supervisor']).eq('ativo', true)
+        .order('role', { ascending: true }).order('nome', { ascending: true })
         .then(({ data }) => (data ?? []) as ProfileRow[])
       : Promise.resolve([]);
 

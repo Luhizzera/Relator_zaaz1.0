@@ -4,7 +4,7 @@ import {
   ArrowRight, Check, Loader2, MapPin, Navigation, RefreshCw, AlertTriangle, Sparkles,
   Camera, X, Image as ImageIcon,
 } from 'lucide-react';
-import { reverseGeocode } from '@/lib/geocoding';
+import { reverseGeocode, UFS } from '@/lib/geocoding';
 import { LocationMapPicker } from '@/components/LocationMapPicker';
 import { toast } from '@/hooks/use-toast';
 import { createManutencaoOrder, addFotoManutencao } from '@/lib/manutencaoService';
@@ -706,14 +706,30 @@ export default function NovaOrdemManutencao() {
             <div className="h-px bg-slate-100 dark:bg-slate-800" />
 
             <div className="grid grid-cols-3 gap-3">
-              <Field
-                label="UF"
-                auto={autoCollect.status === 'success' && !!form.uf}
-                value={form.uf}
-                onChange={updateField('uf')}
-                maxLength={2}
-                className="uppercase"
-              />
+              {/* Seletor, não texto livre: o `className="uppercase"` de antes
+                  era só CSS — o valor gravado podia sair "sp" e o filtro por
+                  estado passaria a listar "SP" e "sp" como opções separadas. */}
+              <div className="min-w-0">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                  UF
+                  {autoCollect.status === 'success' && !!form.uf && (
+                    <span
+                      title="Preenchido automaticamente pela localização"
+                      className="inline-flex items-center gap-0.5 text-[9px] font-black normal-case tracking-normal text-blue-500 dark:text-blue-400"
+                    >
+                      <Sparkles size={10} /> auto
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={form.uf}
+                  onChange={(e) => updateField('uf')(e as unknown as React.ChangeEvent<HTMLInputElement>)}
+                  className="w-full min-w-0 px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="">—</option>
+                  {UFS.map((sigla) => <option key={sigla} value={sigla}>{sigla}</option>)}
+                </select>
+              </div>
               <div className="col-span-2">
                 <Field
                   label="Município"

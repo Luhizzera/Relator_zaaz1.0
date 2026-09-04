@@ -18,6 +18,7 @@ import {
   listOrdensVistoria, createOrdemVistoria, listTecnicosParaVistoria, delegarTecnicoVistoria,
   listPendenciasBacklog,
 } from '@/lib/vistoriaService';
+import { pendenciaParaPonto } from '@/lib/vistoriaExport';
 import type { PendenciaBacklog } from '@/types/vistoria';
 import { listEquipes, listEquipesDoSupervisor } from '@/lib/manutencaoService';
 import { EquipeRow, ProfileRow } from '@/lib/supabaseClient';
@@ -28,6 +29,58 @@ const STATUS_COLOR: Record<StatusOrdemVistoria, string> = {
   concluida: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   cancelada: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400',
 };
+
+/**
+ * Um extremo do trajeto da rota. Antes os dois pontos eram botões idênticos
+ * lado a lado, distinguidos só por um rótulo minúsculo — quem não conhecia o
+ * fluxo não sabia qual era qual, e depois de preenchidos viravam duas
+ * coordenadas iguais em âmbar. Aqui cada ponto carrega três marcas
+ * redundantes: a letra (A/B), a cor (verde/vermelho, a mesma do mapa de
+ * execução) e o verbo ("Começa em" / "Termina em").
+ */
+function PontoTrajeto({
+  extremo, valor, onClick,
+}: {
+  extremo: 'inicio' | 'fim';
+  valor: { lat: number; lng: number } | null;
+  onClick: () => void;
+}) {
+  const inicio = extremo === 'inicio';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors text-left',
+        valor
+          ? 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+          : 'border-dashed border-slate-300 dark:border-slate-700 hover:border-amber-400',
+      )}
+    >
+      <span
+        className={cn(
+          'w-7 h-7 rounded-full flex items-center justify-center text-xs font-black text-white shrink-0',
+          inicio ? 'bg-green-600' : 'bg-red-600',
+        )}
+      >
+        {inicio ? 'A' : 'B'}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[10px] font-black uppercase tracking-wide text-slate-400">
+          {inicio ? 'Começa em' : 'Termina em'}
+        </span>
+        <span className={cn(
+          'block text-xs font-bold truncate',
+          valor ? 'text-slate-700 dark:text-slate-200' : 'text-slate-400',
+        )}
+        >
+          {valor ? `${valor.lat.toFixed(6)}, ${valor.lng.toFixed(6)}` : 'Toque para marcar no mapa'}
+        </span>
+      </span>
+      <MapPin size={14} className={cn('shrink-0', valor ? 'text-slate-400' : 'text-amber-500')} />
+    </button>
+  );
+}
 
 function NovaRotaModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { isGestor, profile } = useAuth();
@@ -143,38 +196,19 @@ function NovaRotaModal({ onClose, onCreated }: { onClose: () => void; onCreated:
               className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 resize-none"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">UTM Início</label>
-              <button
-                type="button"
-                onClick={() => setMapaAberto('inicio')}
-                className={cn(
-                  'w-full flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold rounded-xl border transition-colors text-left',
-                  utmInicio
-                    ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
-                    : 'border-dashed border-slate-300 dark:border-slate-700 text-slate-400 hover:border-amber-400',
-                )}
-              >
-                <MapPin size={14} className="shrink-0" />
-                <span className="truncate">{utmInicio ? `${utmInicio.lat.toFixed(6)}, ${utmInicio.lng.toFixed(6)}` : 'Selecionar no mapa'}</span>
-              </button>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">UTM Fim</label>
-              <button
-                type="button"
-                onClick={() => setMapaAberto('fim')}
-                className={cn(
-                  'w-full flex items-center gap-1.5 px-3 py-2.5 text-xs font-bold rounded-xl border transition-colors text-left',
-                  utmFim
-                    ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
-                    : 'border-dashed border-slate-300 dark:border-slate-700 text-slate-400 hover:border-amber-400',
-                )}
-              >
-                <MapPin size={14} className="shrink-0" />
-                <span className="truncate">{utmFim ? `${utmFim.lat.toFixed(6)}, ${utmFim.lng.toFixed(6)}` : 'Selecionar no mapa'}</span>
-              </button>
+          <div>
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
+              Trajeto da rota
+            </label>
+            {/* Empilhado, não lado a lado: a leitura de cima pra baixo é o
+                próprio sentido do percurso, e o traço tracejado liga um ponto
+                ao outro em vez de deixá-los como dois campos soltos. */}
+            <div className="relative pl-[13px]">
+              <span className="absolute left-[13px] top-9 bottom-9 w-px border-l-2 border-dashed border-slate-300 dark:border-slate-700" />
+              <div className="relative space-y-2 -ml-[13px]">
+                <PontoTrajeto extremo="inicio" valor={utmInicio} onClick={() => setMapaAberto('inicio')} />
+                <PontoTrajeto extremo="fim" valor={utmFim} onClick={() => setMapaAberto('fim')} />
+              </div>
             </div>
           </div>
           <div className="flex gap-2">
@@ -196,8 +230,17 @@ function NovaRotaModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         <div className="fixed inset-0 z-[1001] flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
           <div className="absolute inset-0 bg-black/60" onClick={() => setMapaAberto(null)} />
           <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-4">
-            <p className="text-sm font-black text-slate-800 dark:text-slate-100 mb-3">
-              {mapaAberto === 'inicio' ? 'UTM Início' : 'UTM Fim'}
+            {/* O mapa repete a mesma marca do campo (letra + cor + verbo) pra
+                não haver dúvida sobre qual dos dois se está marcando. */}
+            <p className="text-sm font-black text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2">
+              <span className={cn(
+                'w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-black text-white',
+                mapaAberto === 'inicio' ? 'bg-green-600' : 'bg-red-600',
+              )}
+              >
+                {mapaAberto === 'inicio' ? 'A' : 'B'}
+              </span>
+              {mapaAberto === 'inicio' ? 'Onde a rota começa' : 'Onde a rota termina'}
             </p>
             <LocationMapPicker
               initialLat={(mapaAberto === 'inicio' ? utmInicio : utmFim)?.lat}
@@ -561,7 +604,7 @@ export default function VistoriaOrdersList() {
       {showNovaRota && <NovaRotaModal onClose={() => setShowNovaRota(false)} onCreated={carregar} />}
       {showExport && (
         <ExportarPendenciasModal
-          pendencias={pendenciasFiltradas}
+          pendencias={pendenciasFiltradas.map(pendenciaParaPonto)}
           selecionadas={[]}
           onClose={() => setShowExport(false)}
         />
