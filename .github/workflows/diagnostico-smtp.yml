@@ -1,18 +1,22 @@
 name: Diagnóstico SMTP
 
-# Workflow descartável. Existe só para responder uma pergunta: por que o envio
-# de e-mail do "Resumo de atividade" dá Connection timeout a partir dos runners
-# do GitHub, se o mesmo servidor responde normalmente da rede da empresa.
+# Workflow descartável. Segunda rodada.
 #
-# Quatro tentativas em dois runs, em regiões diferentes da Azure, todas com
-# timeout de 2 minutos — inclusive o passo de aviso de falha, que é uma segunda
-# conexão dois minutos após a primeira. Isso descarta intermitência.
+# A primeira rodada mostrou secrets limpos e a porta 587 ABERTA em menos de um
+# segundo — mas rodou em northcentralus, enquanto os envios que falharam saíram
+# de centralus e eastus. Ou seja: provou alcance de um IP que nunca tentou
+# mandar e-mail, e não reproduziu nada.
 #
-# Nenhum secret é impresso. O que sai no log é o comprimento dos valores (para
-# flagrar espaço colado junto) e o nome da porta configurada — número de porta
-# não é segredo, e é justamente o que precisamos enxergar.
+# Esta versão sonda o TCP e tenta o envio real no MESMO runner, no mesmo
+# minuto, com o log interno do nodemailer ligado. Isso separa as duas
+# explicações que sobraram:
 #
-# Apagar este arquivo depois que o envio estiver resolvido.
+#   • sonda falha + envio falha  -> bloqueio por faixa de IP. Precisa de relay.
+#   • sonda passa  + envio falha -> o servidor sempre esteve alcançável e quem
+#                                   erra é o nodemailer. Conserta-se a chamada.
+#
+# Manda para RESUMO_ALERTA, nunca para a lista de gestores.
+# Apagar depois que o envio estiver resolvido.
 on:
   workflow_dispatch:
 
@@ -20,53 +24,81 @@ jobs:
   diagnosticar:
     runs-on: ubuntu-latest
     steps:
-      - name: Testar alcance do servidor de e-mail
+      - name: Sondar antes do envio
+        id: antes
+        # Sem `-e`: este passo precisa chegar ao fim mesmo com comando falhando,
+        # que é justamente o que ele mede.
+        shell: bash --noprofile --norc {0}
         env:
           HOST: ${{ secrets.SMTP_SERVIDOR }}
           PORTA: ${{ secrets.SMTP_PORTA }}
         run: |
-          echo "=== 1. Sanidade dos secrets ==="
-          echo "SMTP_SERVIDOR: ${#HOST} caracteres"
-          echo "SMTP_PORTA:    ${#PORTA} caracteres  (465/587 têm 3 — mais que isso é espaço ou quebra de linha colada junto)"
-
-          limpo=$(printf '%s' "$HOST" | tr -d '[:space:]')
-          if [ ${#limpo} -ne ${#HOST} ]; then
-            echo "ATENÇÃO: SMTP_SERVIDOR contém espaço ou quebra de linha."
-          fi
-
-          case "$PORTA" in
-            25)   echo "PORTA: 25 — achamos a causa. A Azure bloqueia saída na 25 em toda VM, sem exceção e sem mensagem de erro." ;;
-            465)  echo "PORTA: 465 (TLS implícito)" ;;
-            587)  echo "PORTA: 587 (STARTTLS)" ;;
-            2525) echo "PORTA: 2525 (alternativa comum em hospedagem)" ;;
-            "")   echo "PORTA: VAZIA — o secret não existe ou está em branco." ;;
-            *)    echo "PORTA: valor inesperado — não é 25, 465, 587 nem 2525." ;;
-          esac
-
+          echo "IP de saída deste runner: $(curl -s --max-time 10 https://api.ipify.org)"
+          echo "região: $RUNNER_ENVIRONMENT"
           echo
-          echo "=== 2. O nome do servidor resolve? ==="
-          if getent hosts "$HOST" > /dev/null 2>&1; then
-            echo "sim"
+
+          # Quantidade, não o valor: o endereço resolvido revelaria o host.
+          n4=$(getent ahostsv4 "$HOST" 2>/dev/null | awk '{print $1}' | sort -u | wc -l)
+          n6=$(getent ahostsv6 "$HOST" 2>/dev/null | awk '{print $1}' | grep -c ':')
+          echo "endereços IPv4 publicados: $n4"
+          echo "endereços IPv6 publicados: $n6"
+          if [ "$n6" -gt 0 ]; then
+            echo "  ^ tem AAAA. Os runners do GitHub não têm rota IPv6 — se o"
+            echo "    nodemailer discar o v6 primeiro e não cair pro v4, dá"
+            echo "    exatamente 'Connection timeout' com o servidor no ar."
+          fi
+          echo
+
+          sondar() {
+            timeout 15 bash -c "exec 3<>/dev/tcp/$1/$PORTA" 2>/dev/null && return 0 || return $?
+          }
+
+          echo "-- pelo nome (mesmo caminho que o nodemailer usa) --"
+          sondar "$HOST" && echo "conectou" || echo "FALHOU (código $?)"
+
+          ip4=$(getent ahostsv4 "$HOST" 2>/dev/null | awk '{print $1}' | head -1)
+          echo "-- direto no IPv4, sem passar por resolução --"
+          if [ -n "$ip4" ]; then
+            sondar "$ip4" && echo "conectou" || echo "FALHOU (código $?)"
           else
-            echo "NÃO — nome errado no secret, ou lixo colado junto. Nada além disso importa até corrigir."
-            exit 1
+            echo "sem endereço IPv4 — isso por si só explicaria tudo"
           fi
 
-          echo
-          echo "=== 3. Alcance TCP a partir deste runner ==="
-          # A distinção que interessa: 'timeout' significa pacote descartado em
-          # silêncio, assinatura de firewall bloqueando a origem. 'recusada'
-          # significa que o servidor respondeu dizendo que a porta está fechada
-          # — ou seja, ele é alcançável, só não escuta ali.
-          for p in 25 465 587 2525; do
-            timeout 10 bash -c "exec 3<>/dev/tcp/$HOST/$p" 2>/dev/null && codigo=0 || codigo=$?
-            case $codigo in
-              0)   echo "porta $p: ABERTA" ;;
-              124) echo "porta $p: timeout — pacote descartado (firewall bloqueando este IP)" ;;
-              *)   echo "porta $p: recusada — servidor alcançável, porta fechada" ;;
-            esac
-          done
+      # O envio de verdade, no mesmo runner que acabou de sondar. `nodemailerlog`
+      # e `nodemailerdebug` despejam a conversa interna da biblioteca: qual
+      # endereço ela discou, onde parou, o que o servidor respondeu.
+      - name: Tentar envio real
+        id: envio
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVIDOR }}
+          server_port: ${{ secrets.SMTP_PORTA }}
+          secure: false
+          username: ${{ secrets.SMTP_USUARIO }}
+          password: ${{ secrets.SMTP_SENHA }}
+          from: SurveyOS <${{ secrets.SMTP_USUARIO }}>
+          to: ${{ secrets.RESUMO_ALERTA }}
+          subject: '[TESTE] SurveyOS — sondagem de SMTP'
+          body: |
+            Mensagem de teste do workflow de diagnóstico.
+            Se ela chegou, o envio a partir dos runners do GitHub funciona.
+          nodemailerlog: true
+          nodemailerdebug: true
 
+      - name: Sondar depois do envio
+        if: always()
+        shell: bash --noprofile --norc {0}
+        env:
+          HOST: ${{ secrets.SMTP_SERVIDOR }}
+          PORTA: ${{ secrets.SMTP_PORTA }}
+        run: |
+          echo "resultado do envio: ${{ steps.envio.outcome }}"
           echo
-          echo "=== 4. De onde este runner está falando ==="
-          echo "região Azure: ${RUNNER_ENVIRONMENT:-desconhecida} / $(curl -s --max-time 10 https://api.ipify.org || echo 'IP não obtido')"
+          timeout 15 bash -c "exec 3<>/dev/tcp/$HOST/$PORTA" 2>/dev/null \
+            && echo "sonda depois do envio: conectou" \
+            || echo "sonda depois do envio: FALHOU (código $?)"
+          echo
+          echo "== Leitura =="
+          echo "sonda conectou + envio falhou  -> o servidor está no ar; o erro é do nodemailer."
+          echo "sonda falhou   + envio falhou  -> este IP está bloqueado; precisa de relay."
