@@ -197,8 +197,19 @@ function apurar(ordens, agora) {
   const vencida = (o) => !!o.dataPrevista && o.dataPrevista < agora && !FORA_DO_FLUXO.includes(o.status);
   const dias = (o) => Math.floor((agora - o.createdAt) / 86400000);
 
+  // Canceladas ficam fora de toda métrica operacional. Elas não esperam
+  // técnico, não atrasam e não pertencem ao backlog — contá-las inflava o
+  // total, entrava na conta de "sem técnico" e podia nomear uma OS cancelada
+  // como a mais antiga aguardando delegação, que foi como o problema apareceu.
+  //
+  // Só `vencida` já as excluía, via FORA_DO_FLUXO; o resto olhava a lista
+  // inteira. Elas seguem na planilha, com o rótulo "Cancelada", porque lá o
+  // arquivo é registro e não painel — e é o mesmo recorte que o botão Excel da
+  // tela de Ordens leva.
+  const vivas = ordens.filter((o) => o.status !== 'cancelada');
+
   const porUf = {};
-  for (const o of ordens) {
+  for (const o of vivas) {
     const uf = o.uf || '—';
     porUf[uf] ??= { uf, total: 0, comTecnico: 0, encerradas: 0, semTecnico: [], cidades: new Set() };
     const r = porUf[uf];
@@ -223,10 +234,13 @@ function apurar(ordens, agora) {
   const maisAntiga = foco.semTecnico.reduce((pior, o) => (!pior || o.createdAt < pior.createdAt ? o : pior), null);
 
   return {
-    total: ordens.length,
-    encerradas: ordens.filter((o) => ENCERRADOS.includes(o.status)).length,
-    semTecnico: ordens.filter((o) => !o.tecnicoId).length,
-    vencidas: ordens.filter(vencida).length,
+    total: vivas.length,
+    // Não entra em nenhum texto, mas aparece no log da execução: sem isso, uma
+    // queda no total entre dois dias fica sem explicação para quem confere.
+    canceladas: ordens.length - vivas.length,
+    encerradas: vivas.filter((o) => ENCERRADOS.includes(o.status)).length,
+    semTecnico: vivas.filter((o) => !o.tecnicoId).length,
+    vencidas: vivas.filter(vencida).length,
     regioes,
     foco: {
       uf: foco.uf,
@@ -514,7 +528,8 @@ await gerarXlsx(ordens, destinoXlsx);
 await gerarDocx(metricas, agora, destinoDocx);
 
 console.log(`[resumo-atividade] ${carimbo} — ${metricas.total} OS · ${metricas.encerradas} encerradas · `
-  + `${metricas.semTecnico} sem técnico · foco em ${metricas.foco.uf}`);
+  + `${metricas.semTecnico} sem técnico · foco em ${metricas.foco.uf}`
+  + (metricas.canceladas ? ` · ${metricas.canceladas} cancelada(s) fora da conta` : ''));
 console.log(`[resumo-atividade] ${destinoXlsx}`);
 console.log(`[resumo-atividade] ${destinoDocx}`);
 
