@@ -184,7 +184,16 @@ export const PRIORIDADE_LABEL: Record<PrioridadeOS, string> = {
 export const PROBLEMAS_CTO_GRUPOS: { grupo: string; itens: string[] }[] = [
   {
     grupo: 'CTO',
-    itens: ['CTO quebrada', 'CTO sem tampa', 'CTO solta do poste'],
+    itens: [
+      'CTO quebrada',
+      'CTO sem tampa',
+      'CTO solta do poste',
+      'CTO apresenta infestação de formigas',
+      // Não é defeito do equipamento, e sim de cadastro: a caixa existe em
+      // campo mas não foi localizada no projeto. A ação de campo é identificar,
+      // não reparar — daí a solução correspondente.
+      'CTO não identificada',
+    ],
   },
   {
     grupo: 'Splitter',
@@ -229,6 +238,8 @@ export const SOLUCAO_PROBLEMA_CTO: Record<string, string> = {
   'CTO quebrada': 'CTO reparada/substituída',
   'CTO sem tampa': 'Tampa da CTO reposta',
   'CTO solta do poste': 'CTO fixada no poste',
+  'CTO apresenta infestação de formigas': 'Infestação eliminada e CTO vedada',
+  'CTO não identificada': 'CTO identificada e cadastrada',
   'Splitter quebrado': 'Splitter substituído',
   'Splitter atenuado': 'Splitter substituído/regulado',
   'Splitter roubado': 'Splitter reinstalado',

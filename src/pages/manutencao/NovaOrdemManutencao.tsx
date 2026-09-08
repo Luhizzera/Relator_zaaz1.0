@@ -287,12 +287,31 @@ export default function NovaOrdemManutencao() {
   const hasLocationInfo = hasCoords || !!(form.municipio.trim() && form.endereco.trim());
 
   // ── Navegação entre passos ─────────────────────────────────────────────
-  // Passo 1 exige pelo menos UM problema marcado no checklist (Obs é
-  // opcional) — exceto em "Vistoria Técnica", que por definição parte pra
-  // campo sem um defeito já identificado (é isso que a vistoria vai
-  // levantar). Exigir um problema marcado ali só travava a abertura da OS.
+  // Passo 1 exige que o motivo esteja descrito de ALGUMA forma: um problema
+  // marcado no checklist, ou a Obs preenchida. O checklist cobre o vocabulário
+  // conhecido, mas campo produz caso que ele não previu — e travar a abertura
+  // por falta de uma caixinha que não existe empurra quem abre a OS a marcar
+  // qualquer coisa só pra destravar, que é pior: contamina o dado.
+  //
+  // "Vistoria Técnica" segue livre dos dois, porque por definição parte pra
+  // campo sem defeito identificado — é isso que a vistoria vai levantar.
   const isVistoriaTecnica = form.tipo === 'Vistoria Técnica';
-  const canContinueStep1 = isVistoriaTecnica || problemasSelecionados.length > 0;
+  const temObservacao = form.observacoes.trim().length > 0;
+  const temFoto = fotosIniciais.length > 0;
+
+  // O motivo pode vir do checklist OU da Obs — um dos dois basta.
+  const motivoDescrito = problemasSelecionados.length > 0 || temObservacao;
+
+  // Além do motivo, a abertura passou a exigir foto: sem imagem, quem recebe a
+  // OS depende só do texto pra dimensionar material e deslocamento, e a
+  // categoria "Antes" fica sem par na hora de comprovar o serviço.
+  //
+  // "Vistoria Técnica" continua fora das duas exigências, e agora com mais
+  // razão: ela é aberta ANTES de alguém ir ao local, então não há defeito
+  // identificado nem foto pra anexar. Exigir qualquer um dos dois ali
+  // impossibilitaria abrir uma vistoria — que é justamente o pedido de ir
+  // olhar.
+  const canContinueStep1 = isVistoriaTecnica || (motivoDescrito && temFoto);
   // Etapa 2 não tem mais campo obrigatório (Setor/Responsável vêm
   // pré-preenchidos do perfil de quem está abrindo, e continuam editáveis).
   const canContinueStep2 = true;
@@ -535,10 +554,15 @@ export default function NovaOrdemManutencao() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                  {/* O asterisco some assim que a Obs descreve o caso: os dois
+                      campos são alternativas, e marcar como obrigatório um
+                      campo que já pode ficar vazio faz o formulário mentir. */}
                   Problema informado{' '}
                   {isVistoriaTecnica
                     ? <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional nesta vistoria)</span>
-                    : <span className="text-red-500">*</span>}
+                    : temObservacao
+                      ? <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional — a Obs já descreve)</span>
+                      : <span className="text-red-500">*</span>}
                 </label>
                 <span className={cn(
                   'text-[10px] font-black px-1.5 py-0.5 rounded-full',
@@ -591,7 +615,20 @@ export default function NovaOrdemManutencao() {
 
             <div>
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 block">
-                Obs <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional)</span>
+                {/* O rótulo acompanha o estado do checklist: com algo marcado a
+                    Obs é mesmo opcional; sem nada marcado ela é o caminho para
+                    seguir, e chamá-la de "opcional" ali esconderia justamente a
+                    saída de quem travou. */}
+                Obs <span className="font-normal normal-case text-slate-500 dark:text-slate-400">
+                  {isVistoriaTecnica || problemasSelecionados.length > 0
+                    ? '(opcional)'
+                    : temObservacao
+                      // Já está sozinha sustentando o motivo — convidar a
+                      // "descrever o caso aqui" pediria algo que acabou de ser
+                      // feito, e contradiria o rótulo do checklist logo acima.
+                      ? '(descreve o motivo)'
+                      : '(ou descreva o caso aqui)'}
+                </span>
               </label>
               <textarea
                 value={form.observacoes}
@@ -604,7 +641,10 @@ export default function NovaOrdemManutencao() {
 
             <div>
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 block">
-                Fotos do problema <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional, categoria "Antes")</span>
+                Fotos do problema{' '}
+                {isVistoriaTecnica
+                  ? <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional nesta vistoria, categoria "Antes")</span>
+                  : <><span className="text-red-500">*</span> <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(categoria "Antes")</span></>}
               </label>
               <p className="text-[11px] text-slate-600 dark:text-slate-300 mb-2">
                 Ficam salvas na aba Fotos e o técnico de manutenção já vê como estava antes de ir a campo.
@@ -926,9 +966,14 @@ export default function NovaOrdemManutencao() {
         {/* Aviso perto do próprio botão desabilitado — o selo "nenhum marcado"
             lá em cima do checklist fica fora de vista em formulários longos,
             então quem rola direto até o fim não entendia por que travou. */}
+        {/* Diz o que falta, e não que "falta algo": com duas exigências
+            independentes, uma mensagem genérica obriga quem já preencheu
+            metade a caçar qual metade. */}
         {step === 'motivo' && !canContinueStep1 && (
           <p className="text-xs font-semibold text-red-500 text-right -mb-1">
-            Marque ao menos um problema para continuar.
+            {!motivoDescrito
+              ? 'Marque ao menos um problema, ou descreva o caso na Obs.'
+              : 'Anexe ao menos uma foto para continuar.'}
           </p>
         )}
         {step === 'localizacao' && !hasLocationInfo && !isAutoBusy && (
