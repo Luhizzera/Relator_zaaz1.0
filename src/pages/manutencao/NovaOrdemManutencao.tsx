@@ -33,6 +33,9 @@ const TIPOS = [
   'Preventiva CTO', 'Preventiva Rede',
 ];
 const ORIGENS = ['Chamado do cliente', 'Sistema', 'Fiscalização', 'Solicitação interna'];
+// Explícito em vez de ORIGENS[0]: o padrão não é "a primeira da lista", e
+// deixá-lo posicional faria reordenar o select trocar o padrão sem querer.
+const ORIGEM_PADRAO = 'Solicitação interna';
 
 // Múltipla escolha, porque mais de um problema costuma coexistir na mesma
 // CTO (ex: quebrada + sem tampa). Serialização por '||' vive em
@@ -150,7 +153,7 @@ export default function NovaOrdemManutencao() {
     const previsto = new Date(Date.now() + 48 * 60 * 60 * 1000); // +48h a partir da abertura
     return {
       tipo: TIPOS[0],
-      origem: ORIGENS[0],
+      origem: ORIGEM_PADRAO,
       prioridade: 'media' as PrioridadeOS,
       problemaInformado: '', // string serializada ('||') dos itens marcados no checklist
       observacoes: '', // texto livre, opcional
@@ -554,15 +557,17 @@ export default function NovaOrdemManutencao() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
-                  {/* O asterisco some assim que a Obs descreve o caso: os dois
-                      campos são alternativas, e marcar como obrigatório um
-                      campo que já pode ficar vazio faz o formulário mentir. */}
+                  {/* O asterisco não some quando a Obs é preenchida, mesmo que
+                      ela destrave o passo. Os dois campos não são equivalentes:
+                      marcar no checklist é o caminho esperado, porque alimenta o
+                      checklist de execução e as ocorrências com vocabulário
+                      controlado. A Obs vira texto livre, que ninguém agrega.
+                      Rotular o checklist de "opcional" convidaria a pular
+                      justamente a parte que estrutura o dado. */}
                   Problema informado{' '}
                   {isVistoriaTecnica
                     ? <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional nesta vistoria)</span>
-                    : temObservacao
-                      ? <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional — a Obs já descreve)</span>
-                      : <span className="text-red-500">*</span>}
+                    : <span className="text-red-500">*</span>}
                 </label>
                 <span className={cn(
                   'text-[10px] font-black px-1.5 py-0.5 rounded-full',
@@ -619,16 +624,12 @@ export default function NovaOrdemManutencao() {
                     Obs é mesmo opcional; sem nada marcado ela é o caminho para
                     seguir, e chamá-la de "opcional" ali esconderia justamente a
                     saída de quem travou. */}
-                Obs <span className="font-normal normal-case text-slate-500 dark:text-slate-400">
-                  {isVistoriaTecnica || problemasSelecionados.length > 0
-                    ? '(opcional)'
-                    : temObservacao
-                      // Já está sozinha sustentando o motivo — convidar a
-                      // "descrever o caso aqui" pediria algo que acabou de ser
-                      // feito, e contradiria o rótulo do checklist logo acima.
-                      ? '(descreve o motivo)'
-                      : '(ou descreva o caso aqui)'}
-                </span>
+                {/* Sempre "(opcional)", em qualquer estado. Ela destrava o passo
+                    quando nada foi marcado, mas isso é saída de emergência para
+                    o caso que o checklist não previu — não uma alternativa de
+                    igual valor. Quem precisa dela descobre pelo aviso do botão,
+                    que é onde a pessoa travada realmente olha. */}
+                Obs <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional)</span>
               </label>
               <textarea
                 value={form.observacoes}
@@ -972,7 +973,7 @@ export default function NovaOrdemManutencao() {
         {step === 'motivo' && !canContinueStep1 && (
           <p className="text-xs font-semibold text-red-500 text-right -mb-1">
             {!motivoDescrito
-              ? 'Marque ao menos um problema, ou descreva o caso na Obs.'
+              ? 'Marque ao menos um problema — ou, se nenhuma opção servir, descreva na Obs.'
               : 'Anexe ao menos uma foto para continuar.'}
           </p>
         )}
