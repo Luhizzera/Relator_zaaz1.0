@@ -211,20 +211,32 @@ function apurar(ordens, agora) {
   const porUf = {};
   for (const o of vivas) {
     const uf = o.uf || '—';
-    porUf[uf] ??= { uf, total: 0, comTecnico: 0, encerradas: 0, semTecnico: [], cidades: new Set() };
+    porUf[uf] ??= { uf, total: 0, comTecnico: 0, encerradas: 0, vencidas: 0, semTecnico: [], cidades: new Set() };
     const r = porUf[uf];
     r.total += 1;
     if (o.tecnicoId) r.comTecnico += 1; else r.semTecnico.push(o);
     if (ENCERRADOS.includes(o.status)) r.encerradas += 1;
+    // Sobre a região inteira, não só sobre as sem técnico: ordem já delegada
+    // também estoura prazo, e é justamente a que ninguém percebe — ela não
+    // aparece em nenhuma fila de pendência.
+    if (vencida(o)) r.vencidas += 1;
     if (o.municipio) r.cidades.add(o.municipio);
   }
 
   const regioes = Object.values(porUf)
-    .map((r) => ({
-      ...r,
-      proporcao: r.total ? r.comTecnico / r.total : 0,
-      situacao: r.comTecnico === 0 ? 'Parado' : (r.comTecnico / r.total >= 0.7 ? 'Operando' : 'Parcial'),
-    }))
+    .map((r) => {
+      const esperas = r.semTecnico.map(dias);
+      return {
+        ...r,
+        proporcao: r.total ? r.comTecnico / r.total : 0,
+        situacao: r.comTecnico === 0 ? 'Parado' : (r.comTecnico / r.total >= 0.7 ? 'Operando' : 'Parcial'),
+        // Espera e cidades DAS ORDENS SEM TÉCNICO, não da região inteira. É a
+        // mesma distinção que já valia no foco: contar a região produzia frases
+        // impossíveis assim que parte do backlog era delegada.
+        espera: esperas.length ? esperas.reduce((s, d) => s + d, 0) / esperas.length : 0,
+        cidadesSemTecnico: new Set(r.semTecnico.map((o) => o.municipio).filter(Boolean)).size,
+      };
+    })
     .sort((a, b) => b.total - a.total);
 
   // O foco do panorama acompanha o problema em vez de ficar preso ao Paraná:
@@ -552,7 +564,29 @@ if (process.env.GITHUB_OUTPUT) {
 const idxSumario = process.argv.indexOf('--sumario');
 if (idxSumario > -1) {
   const m = metricas;
-  const f = m.foco;
+
+  /**
+   * Uma frase por região, escolhendo sozinha o que há de mais relevante ali.
+   *
+   * Antes o e-mail trazia um mergulho só na região com maior fila. Isso lia
+   * bem, mas apagava as outras: quem cuida de SP não tinha o que ler quando o
+   * problema estava em MG, e um atraso em região "calma" passava batido. A
+   * ordem das perguntas é a da urgência — fila sem dono, depois prazo
+   * estourado, e só então o estado normal.
+   */
+  const pontoDaRegiao = (r) => {
+    if (r.semTecnico.length) {
+      const espera = r.espera.toFixed(1).replace('.', ',');
+      return `${plural(r.semTecnico.length, 'ordem sem técnico', 'ordens sem técnico')}`
+        + ` em ${plural(r.cidadesSemTecnico, 'cidade', 'cidades')}, ${espera} dias de espera em média`
+        + (r.vencidas ? ` · ${plural(r.vencidas, 'já vencida', 'já vencidas')}` : '');
+    }
+    if (r.vencidas) {
+      return `tudo delegado, mas ${plural(r.vencidas, 'ordem passou', 'ordens passaram')} do prazo`;
+    }
+    return `tudo delegado · ${r.encerradas} de ${r.total} encerradas`;
+  };
+
   const linhaRegiao = (r) => `<tr>
       <td style="padding:6px 12px;border-bottom:1px solid #e6ecec"><b>${r.uf}</b></td>
       <td style="padding:6px 12px;border-bottom:1px solid #e6ecec;color:${
@@ -582,11 +616,13 @@ if (idxSumario > -1) {
     </tr>
     ${m.regioes.map(linhaRegiao).join('\n    ')}
   </table>
-  <p style="font-size:14px;line-height:1.5;margin:0 0 18px">
-    <b>Atenção em ${f.uf}:</b> ${plural(f.semTecnico, 'ordem aberta', 'ordens abertas')} em
-    ${plural(f.cidades, 'cidade', 'cidades')} sem técnico atribuído, ${f.esperaMedia.toFixed(1).replace('.', ',')} dias
-    de espera em média e ${plural(f.vencidas, 'já vencida', 'já vencidas')}.
-  </p>
+  <p style="font-size:11px;font-weight:700;letter-spacing:2px;color:#1f6f68;margin:0 0 8px">O QUE OLHAR EM CADA REGIÃO</p>
+  <table style="border-collapse:collapse;font-size:14px;width:100%;margin:0 0 18px">
+    ${m.regioes.map((r) => `<tr>
+      <td valign="top" style="padding:3px 10px 3px 0;white-space:nowrap"><b>${r.uf}</b></td>
+      <td valign="top" style="padding:3px 0;line-height:1.5">${pontoDaRegiao(r)}</td>
+    </tr>`).join('\n    ')}
+  </table>
   <p style="color:#667a80;font-size:12px;margin:0">
     Planilha e documento completos em anexo. Gerado automaticamente pelo SurveyOS — não responda a este e-mail.
   </p>
