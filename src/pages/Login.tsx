@@ -55,6 +55,11 @@ export default function Login() {
     }
   }, []);
 
+  // Os campos limpam o erro ao serem digitados porque a caixa de mensagem é
+  // compartilhada pelos dois fluxos. Um erro vindo do Google fica ali até o
+  // próximo envio — e ver "Unable to exchange external code" logo acima do
+  // botão Entrar, com usuário e senha já preenchidos, faz parecer que foi o
+  // login por senha que falhou. Já custou uma investigação inteira.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -191,7 +196,7 @@ export default function Login() {
                   <input
                     required
                     value={nome}
-                    onChange={(e) => setNome(e.target.value)}
+                    onChange={(e) => { setNome(e.target.value); setError(null); }}
                     placeholder="Nome completo"
                     className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -204,7 +209,7 @@ export default function Login() {
                   required
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => { setEmail(e.target.value); setError(null); }}
                   placeholder="E-mail"
                   className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
@@ -217,7 +222,7 @@ export default function Login() {
                   type="password"
                   minLength={6}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); setError(null); }}
                   placeholder="Senha"
                   className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
