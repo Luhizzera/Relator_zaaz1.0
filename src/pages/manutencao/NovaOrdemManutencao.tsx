@@ -273,12 +273,23 @@ export default function NovaOrdemManutencao() {
       numeroEndereco: prev.numeroEndereco || addr?.numeroEndereco,
       referencia: prev.referencia || addr?.referencia,
     }));
-    setAutoCollect({
-      status: 'success',
-      latitude: lat,
-      longitude: lng,
-      numeroAproximado: !!(addr?.numeroAproximado && addr?.numeroEndereco),
-    });
+    // Antes marcava 'success' mesmo com `addr` nulo. O GPS automático já
+    // avisava ("partial"), o mapa não — e foi por esse caminho silencioso que
+    // uma OS nasceu com coordenada e nenhum endereço: quem marcou o ponto viu
+    // tudo verde e seguiu.
+    setAutoCollect(addr
+      ? {
+        status: 'success',
+        latitude: lat,
+        longitude: lng,
+        numeroAproximado: !!(addr.numeroAproximado && addr.numeroEndereco),
+      }
+      : {
+        status: 'partial',
+        latitude: lat,
+        longitude: lng,
+        errorMessage: 'Ponto marcado, mas o endereço não foi identificado automaticamente. Selecione a UF e, se puder, preencha o endereço.',
+      });
   };
 
   const isAutoBusy = autoCollect.status === 'locating' || autoCollect.status === 'geocoding';
@@ -288,6 +299,15 @@ export default function NovaOrdemManutencao() {
   // mapa) quanto um endereço mínimo digitado à mão; só bloqueia quando os
   // dois estão vazios.
   const hasLocationInfo = hasCoords || !!(form.municipio.trim() && form.endereco.trim());
+
+  // UF obrigatória para criar. Coordenada sozinha localiza o ponto, mas não
+  // classifica a OS: sem UF ela cai fora de todo filtro por estado e aparece
+  // no resumo diário como uma região "—". A geocodificação reversa preenche a
+  // UF quase sempre — o Nominatim conhece até trecho de rodovia rural —, mas
+  // quando a chamada falha (rede fraca, timeout, limite de uso) ela volta
+  // vazia, e antes disso nada impedia a OS de nascer assim.
+  const temUf = !!form.uf;
+  const podeCriar = hasLocationInfo && temUf;
 
   // ── Navegação entre passos ─────────────────────────────────────────────
   // Passo 1 exige que o motivo esteja descrito de ALGUMA forma: um problema
@@ -752,7 +772,7 @@ export default function NovaOrdemManutencao() {
                   estado passaria a listar "SP" e "sp" como opções separadas. */}
               <div className="min-w-0">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
-                  UF
+                  UF<span className="text-red-500">*</span>
                   {autoCollect.status === 'success' && !!form.uf && (
                     <span
                       title="Preenchido automaticamente pela localização"
@@ -982,6 +1002,27 @@ export default function NovaOrdemManutencao() {
             Capture a localização ou preencha município e endereço para criar a OS.
           </p>
         )}
+        {/* O seletor de UF mora no passo 2, mas quem marca o ponto pelo mapa
+            só faz isso aqui, no passo 3 — então é aqui que a falta de UF
+            aparece. Mandar a pessoa voltar sem dizer para onde seria pior que
+            oferecer o campo no próprio lugar em que ela travou. Mesmo estado
+            do seletor do passo 2: escolher aqui preenche lá também. */}
+        {step === 'localizacao' && hasLocationInfo && !temUf && !isAutoBusy && (
+          <div className="flex items-center justify-end gap-2 -mb-1">
+            <p className="text-xs font-semibold text-red-500 text-right">
+              A localização não informou o estado. Selecione a UF para criar a OS:
+            </p>
+            <select
+              aria-label="UF"
+              value={form.uf}
+              onChange={(e) => setForm((prev) => ({ ...prev, uf: e.target.value }))}
+              className="px-2 py-1.5 text-sm rounded-lg border border-red-300 dark:border-red-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="">UF</option>
+              {UFS.map((sigla) => <option key={sigla} value={sigla}>{sigla}</option>)}
+            </select>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
@@ -1009,7 +1050,7 @@ export default function NovaOrdemManutencao() {
             <button
               type="button"
               onClick={handleCriarOrdem}
-              disabled={creating || !hasLocationInfo}
+              disabled={creating || !podeCriar}
               className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-sm transition-colors disabled:opacity-40"
             >
               {creating ? <Loader2 className="icon-md animate-spin" /> : <Check className="icon-md" />}
