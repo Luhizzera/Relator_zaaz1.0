@@ -12,6 +12,7 @@ import {
 } from '@/types/vistoria';
 import { createManutencaoOrder, addFotoManutencao } from '@/lib/manutencaoService';
 import { reverseGeocode } from '@/lib/geocoding';
+import { ufPorCoordenada } from '@/lib/ufPorCoordenada';
 import type { ManutencaoOrdem, PrioridadeOS } from '@/types/manutencao';
 
 /**
@@ -352,6 +353,9 @@ export async function gerarOSCorretivaDaPendencia(
   const addr = await reverseGeocode(pendencia.latitude, pendencia.longitude, {
     buscarNumeroAproximado: false,
   });
+  // Este é o caminho que o formulário não protege: não há tela onde exigir UF.
+  // Por isso o fallback local importa mais aqui do que em qualquer outro lugar.
+  const uf = addr?.uf || (await ufPorCoordenada(pendencia.latitude, pendencia.longitude)) || undefined;
 
   const novaOrdem = await createManutencaoOrder({
     tipo: opts.tipo,
@@ -368,7 +372,7 @@ export async function gerarOSCorretivaDaPendencia(
     problemaInformado: pendencia.problemas ?? undefined,
     latitude: pendencia.latitude,
     longitude: pendencia.longitude,
-    uf: addr?.uf || undefined,
+    uf,
     municipio: addr?.municipio || undefined,
     bairro: addr?.bairro || undefined,
     endereco: addr?.endereco || undefined,

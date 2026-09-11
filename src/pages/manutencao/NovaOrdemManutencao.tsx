@@ -5,6 +5,7 @@ import {
   Camera, X, Image as ImageIcon,
 } from 'lucide-react';
 import { reverseGeocode, UFS } from '@/lib/geocoding';
+import { ufPorCoordenada, precarregarMalhaUf } from '@/lib/ufPorCoordenada';
 import { LocationMapPicker } from '@/components/LocationMapPicker';
 import { toast } from '@/hooks/use-toast';
 import { createManutencaoOrder, addFotoManutencao } from '@/lib/manutencaoService';
@@ -216,22 +217,28 @@ export default function NovaOrdemManutencao() {
         setAutoCollect({ status: 'geocoding', latitude, longitude, accuracy });
 
         const addr = await reverseGeocode(latitude, longitude);
+        // UF do Nominatim quando ele responde (limites detalhados do OSM); se
+        // não, da malha do IBGE, calculada localmente. Ver ufPorCoordenada.ts.
+        const uf = addr?.uf || (await ufPorCoordenada(latitude, longitude)) || '';
         if (addr) {
           setForm((prev) => ({
             ...prev,
             bairro: prev.bairro || addr.bairro,
             municipio: prev.municipio || addr.municipio,
-            uf: prev.uf || addr.uf,
+            uf: prev.uf || uf,
             endereco: prev.endereco || addr.endereco,
             numeroEndereco: prev.numeroEndereco || addr.numeroEndereco,
             referencia: prev.referencia || addr.referencia,
           }));
           setAutoCollect({ status: 'success', latitude, longitude, accuracy, numeroAproximado: addr.numeroAproximado });
         } else {
+          if (uf) setForm((prev) => ({ ...prev, uf: prev.uf || uf }));
           setAutoCollect({
             status: 'partial',
             latitude, longitude, accuracy,
-            errorMessage: 'Coordenadas capturadas, mas não foi possível identificar o endereço automaticamente. Preencha manualmente se necessário.',
+            errorMessage: uf
+              ? `Coordenadas capturadas e UF identificada (${uf}), mas o endereço não veio automaticamente. Preencha se necessário.`
+              : 'Coordenadas capturadas, mas não foi possível identificar o endereço automaticamente. Preencha manualmente se necessário.',
           });
         }
       },
@@ -253,6 +260,9 @@ export default function NovaOrdemManutencao() {
   // Dispara assim que o wizard abre — não espera o usuário chegar no passo 3,
   // pra que os campos de endereço do passo 2 já venham preenchidos.
   useEffect(() => {
+    // Malha de UFs desce agora, enquanto ainda há sinal — o app não tem
+    // service worker, e é justamente sem rede que ela vai ser necessária.
+    precarregarMalhaUf();
     runAutoCollect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -262,13 +272,14 @@ export default function NovaOrdemManutencao() {
     setShowMapPicker(false);
     setAutoCollect({ status: 'geocoding', latitude: lat, longitude: lng });
     const addr = await reverseGeocode(lat, lng);
+    const uf = addr?.uf || (await ufPorCoordenada(lat, lng)) || '';
     // Mesma precedência do runAutoCollect: o que o usuário já digitou manualmente
     // vence — ajustar o pino no mapa não deve apagar uma correção manual.
     setForm((prev) => ({
       ...prev,
       bairro: prev.bairro || addr?.bairro,
       municipio: prev.municipio || addr?.municipio,
-      uf: prev.uf || addr?.uf,
+      uf: prev.uf || uf,
       endereco: prev.endereco || addr?.endereco,
       numeroEndereco: prev.numeroEndereco || addr?.numeroEndereco,
       referencia: prev.referencia || addr?.referencia,
@@ -288,7 +299,9 @@ export default function NovaOrdemManutencao() {
         status: 'partial',
         latitude: lat,
         longitude: lng,
-        errorMessage: 'Ponto marcado, mas o endereço não foi identificado automaticamente. Selecione a UF e, se puder, preencha o endereço.',
+        errorMessage: uf
+          ? `Ponto marcado e UF identificada (${uf}), mas o endereço não veio automaticamente. Preencha se puder.`
+          : 'Ponto marcado, mas o endereço não foi identificado automaticamente. Selecione a UF e, se puder, preencha o endereço.',
       });
   };
 
