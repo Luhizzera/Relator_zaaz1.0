@@ -21,29 +21,8 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
+import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { cn } from '@/lib/utils';
-
-/** Redimensiona/comprime uma foto de câmera antes do upload — mesmo princípio de Photos.tsx (max 1200px, jpeg 0.7). */
-function normalizeImage(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (e) => {
-      const img = new Image();
-      img.src = e.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 1200;
-        let { width, height } = img;
-        if (width > height && width > maxDim) { height *= maxDim / width; width = maxDim; }
-        else if (height > maxDim) { width *= maxDim / height; height = maxDim; }
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-    };
-  });
-}
 
 // Próxima ação recomendada por status — navegação linear (uma ação grande por vez).
 const PROXIMA_ACAO: Partial<Record<StatusOS, { label: string; icon: any; proximo: StatusOS; acao: string }>> = {
@@ -316,21 +295,31 @@ export default function ManutencaoExecucaoMobile() {
   const handleFotoSelected = async (file: File | undefined) => {
     if (!file || !ordem) return;
     setEnviandoMidia('foto');
-    const dataUrl = await normalizeImage(file);
     try {
-      if (!navigator.onLine) throw new Error('offline');
-      await addFotoManutencao(ordem.id, dataUrl, 'depois');
-      toast({ title: 'Foto anexada' });
-      carregar();
-    } catch (err) {
-      if (!navigator.onLine) {
-        await enqueueFoto(ordem.id, dataUrl, 'depois');
-        toast({ title: 'Sem conexão', description: 'Foto salva no aparelho — será enviada quando a conexão voltar.' });
-        atualizarPendentes();
-      } else {
-        console.error('[Manutencao] Erro ao anexar foto:', err);
-        toast({ title: 'Não foi possível enviar a foto', description: err instanceof Error ? err.message : undefined, variant: 'destructive' });
+      // Dentro do try de propósito. Antes a conversão ficava fora: uma foto
+      // que o navegador não abria deixava o spinner dos dois botões girando
+      // para sempre, porque o finally que o desliga nunca era alcançado.
+      const dataUrl = await normalizarFoto(file);
+      try {
+        if (!navigator.onLine) throw new Error('offline');
+        await addFotoManutencao(ordem.id, dataUrl, 'depois');
+        toast({ title: 'Foto anexada' });
+        carregar();
+      } catch (err) {
+        if (!navigator.onLine) {
+          await enqueueFoto(ordem.id, dataUrl, 'depois');
+          toast({ title: 'Sem conexão', description: 'Foto salva no aparelho — será enviada quando a conexão voltar.' });
+          atualizarPendentes();
+        } else {
+          console.error('[Manutencao] Erro ao anexar foto:', err);
+          toast({ title: 'Não foi possível enviar a foto', description: err instanceof Error ? err.message : undefined, variant: 'destructive' });
+        }
       }
+    } catch (err) {
+      // Só chega aqui o que não é falha de envio: a foto que não abriu, ou o
+      // aparelho sem espaço para guardar a fila offline.
+      console.error('[Manutencao] Erro ao preparar foto:', err);
+      toast({ title: 'Não foi possível anexar a foto', description: mensagemErroFoto(err), variant: 'destructive' });
     } finally {
       setEnviandoMidia(null);
       if (fotoInputRef.current) fotoInputRef.current.value = '';

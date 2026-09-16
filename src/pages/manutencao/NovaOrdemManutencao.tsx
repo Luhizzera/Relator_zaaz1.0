@@ -8,6 +8,7 @@ import { reverseGeocode, UFS } from '@/lib/geocoding';
 import { ufPorCoordenada, precarregarMalhaUf } from '@/lib/ufPorCoordenada';
 import { LocationMapPicker } from '@/components/LocationMapPicker';
 import { toast } from '@/hooks/use-toast';
+import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { createManutencaoOrder, addFotoManutencao } from '@/lib/manutencaoService';
 import {
   PrioridadeOS, PRIORIDADE_LABEL, PROBLEMAS_CTO_GRUPOS, deserializeProblemas, serializeProblemas,
@@ -60,28 +61,6 @@ function formatTimeLocal(d: Date) {
   const hh = String(d.getHours()).padStart(2, '0');
   const mi = String(d.getMinutes()).padStart(2, '0');
   return `${hh}:${mi}`;
-}
-
-/** Redimensiona/comprime uma foto antes do upload — mesmo princípio usado em ManutencaoExecucaoMobile.tsx (max 1200px, jpeg 0.7). */
-function normalizeImage(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (e) => {
-      const img = new Image();
-      img.src = e.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 1200;
-        let { width, height } = img;
-        if (width > height && width > maxDim) { height *= maxDim / width; width = maxDim; }
-        else if (height > maxDim) { width *= maxDim / height; height = maxDim; }
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-    };
-  });
 }
 
 type AutoCollectStatus = 'idle' | 'locating' | 'geocoding' | 'success' | 'partial' | 'error';
@@ -373,10 +352,22 @@ export default function NovaOrdemManutencao() {
     if (!files || files.length === 0) return;
     setProcessandoFoto(true);
     try {
-      const novas = await Promise.all(
-        Array.from(files).map(async (file) => ({ id: crypto.randomUUID(), dataUrl: await normalizeImage(file) })),
-      );
-      setFotosIniciais((prev) => [...prev, ...novas]);
+      // allSettled, e não all: uma foto ilegível numa seleção múltipla não pode
+      // descartar as outras. As que abriram entram; as que não abriram viram
+      // aviso com o motivo. Importa mais desde que a foto passou a ser
+      // obrigatória para abrir a OS — antes, dava para seguir sem ela.
+      const resultados = await Promise.allSettled(Array.from(files).map((file) => normalizarFoto(file)));
+      const novas = resultados.flatMap((r) => (r.status === 'fulfilled' ? [{ id: crypto.randomUUID(), dataUrl: r.value }] : []));
+      if (novas.length > 0) setFotosIniciais((prev) => [...prev, ...novas]);
+      const falhas = resultados.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (falhas.length > 0) {
+        console.error('[Manutencao] Foto(s) ilegível(is):', falhas.map((f) => f.reason));
+        toast({
+          title: falhas.length === 1 ? 'Uma foto não pôde ser usada' : `${falhas.length} fotos não puderam ser usadas`,
+          description: mensagemErroFoto(falhas[0].reason),
+          variant: 'destructive',
+        });
+      }
     } finally {
       setProcessandoFoto(false);
       // Limpa os dois — não dá pra saber de qual dos dois inputs (galeria ou

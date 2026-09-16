@@ -32,6 +32,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { BackButton } from '@/components/BackButton';
 import { StorageService, createDebounced } from '@/lib/cacheService';
 import { toast } from '@/hooks/use-toast';
+import { normalizarFoto, mensagemErroFoto, pareceImagem } from '@/lib/normalizarFoto';
 
 // ─────────────────────────────────────────────
 // Persist debounced
@@ -52,29 +53,6 @@ const getPreciseLocation = (): Promise<string | null> =>
       () => resolve(null),
       { enableHighAccuracy: true, timeout: 5000 },
     );
-  });
-
-// ─────────────────────────────────────────────
-// Compressor de imagem
-// ─────────────────────────────────────────────
-const normalizeImage = (file: File): Promise<string> =>
-  new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (e) => {
-      const img = new Image();
-      img.src = e.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 1200;
-        let { width, height } = img;
-        if (width > height && width > maxDim) { height *= maxDim / width; width = maxDim; }
-        else if (height > maxDim) { width *= maxDim / height; height = maxDim; }
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-    };
   });
 
 // ─────────────────────────────────────────────
@@ -268,24 +246,50 @@ export default function Photos() {
   const handleFilesRef = useRef<(files: FileList | File[]) => void>(null!);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
-    const fileArray = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    // `pareceImagem` em vez de `type.startsWith('image/')`: o Android entrega
+    // HEIC com tipo vazio, e o filtro antigo sumia com a foto sem aviso.
+    const fileArray = Array.from(files).filter(pareceImagem);
     if (!fileArray.length) return;
     setUploadingCount(fileArray.length);
-    for (const file of fileArray) {
-      let utmLocation: string | null = null;
-      let geoAttempted = false;
-      if (useGeo) { geoAttempted = true; utmLocation = await getPreciseLocation(); }
-      const optimizedSrc = await normalizeImage(file);
-      addPhoto({
-        id:          `p-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        src:         optimizedSrc,
-        description: '',
-        observacoes: '',
-        location:    utmLocation,
-        geoAttempted,
+    let falhas = 0;
+    let primeiraFalha: unknown = null;
+    try {
+      for (const file of fileArray) {
+        // Converte antes de pedir o GPS: se a foto não abre, não vale gastar
+        // uma leitura de localização com ela.
+        let optimizedSrc: string;
+        try {
+          optimizedSrc = await normalizarFoto(file);
+        } catch (err) {
+          console.error('[Photos] Foto ilegível:', err);
+          falhas += 1;
+          primeiraFalha ??= err;
+          continue;
+        }
+        let utmLocation: string | null = null;
+        let geoAttempted = false;
+        if (useGeo) { geoAttempted = true; utmLocation = await getPreciseLocation(); }
+        addPhoto({
+          id:          `p-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          src:         optimizedSrc,
+          description: '',
+          observacoes: '',
+          location:    utmLocation,
+          geoAttempted,
+        });
+      }
+    } finally {
+      // Sem o finally, qualquer erro no meio do laço deixava
+      // "Processando N..." na tela para sempre.
+      setUploadingCount(0);
+    }
+    if (falhas > 0) {
+      toast({
+        title: falhas === 1 ? 'Uma foto não pôde ser usada' : `${falhas} fotos não puderam ser usadas`,
+        description: mensagemErroFoto(primeiraFalha),
+        variant: 'destructive',
       });
     }
-    setUploadingCount(0);
     if (!navigator.onLine) setHasPending(true);
   }, [useGeo, addPhoto]);
 

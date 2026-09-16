@@ -31,6 +31,7 @@ import { BackButton } from '@/components/BackButton';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { toast } from '@/hooks/use-toast';
+import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { cn } from '@/lib/utils';
 
 type Aba = 'resumo' | 'execucao' | 'ocorrencias' | 'materiais' | 'checklist' | 'fotos' | 'videos' | 'localizacao' | 'aprovacao' | 'historico';
@@ -65,27 +66,6 @@ const CATEGORIAS_FOTO: { key: CategoriaFotoOS | 'todas'; label: string }[] = [
   { key: 'depois', label: 'Depois' },
 ];
 
-function normalizeImage(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (e) => {
-      const img = new Image();
-      img.src = e.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 1200;
-        let { width, height } = img;
-        if (width > height && width > maxDim) { height *= maxDim / width; width = maxDim; }
-        else if (height > maxDim) { width *= maxDim / height; height = maxDim; }
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-    };
-  });
-}
-
 function AbaFotos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: () => void }) {
   const [categoria, setCategoria] = useState<CategoriaFotoOS>('depois');
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -107,12 +87,36 @@ function AbaFotos({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged: () 
     if (!files || files.length === 0) return;
     setEnviando(true);
     try {
+      // Foto ilegível não interrompe as demais: é pulada e contada no aviso.
+      // Falha de envio continua interrompendo — sem rede, as seguintes
+      // falhariam do mesmo jeito.
+      let enviadas = 0;
+      let falhas = 0;
+      let primeiraFalha: unknown = null;
       for (const file of Array.from(files)) {
-        const dataUrl = await normalizeImage(file);
+        let dataUrl: string;
+        try {
+          dataUrl = await normalizarFoto(file);
+        } catch (err) {
+          console.error('[Manutencao] Foto ilegível:', err);
+          falhas += 1;
+          primeiraFalha ??= err;
+          continue;
+        }
         await addFotoManutencao(ordem.id, dataUrl, categoria);
+        enviadas += 1;
       }
-      toast({ title: 'Foto(s) enviada(s)' });
-      onChanged();
+      if (enviadas > 0) {
+        toast({ title: enviadas === 1 ? 'Foto enviada' : `${enviadas} fotos enviadas` });
+        onChanged();
+      }
+      if (falhas > 0) {
+        toast({
+          title: falhas === 1 ? 'Uma foto não pôde ser usada' : `${falhas} fotos não puderam ser usadas`,
+          description: mensagemErroFoto(primeiraFalha),
+          variant: 'destructive',
+        });
+      }
     } catch (err) {
       console.error('[Manutencao] Erro ao enviar foto:', err);
       toast({ title: 'Não foi possível enviar', description: err instanceof Error ? err.message : undefined, variant: 'destructive' });

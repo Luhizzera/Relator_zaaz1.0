@@ -17,29 +17,8 @@ import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
 import { BackButton } from '@/components/BackButton';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { toast } from '@/hooks/use-toast';
+import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { cn } from '@/lib/utils';
-
-/** Mesmo princípio de ManutencaoExecucaoMobile.tsx (max 1200px, jpeg 0.7) — comprime antes do upload. */
-function normalizeImage(file: File): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (e) => {
-      const img = new Image();
-      img.src = e.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 1200;
-        let { width, height } = img;
-        if (width > height && width > maxDim) { height *= maxDim / width; width = maxDim; }
-        else if (height > maxDim) { width *= maxDim / height; height = maxDim; }
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-    };
-  });
-}
 
 type GeoStatus = 'idle' | 'locating' | 'success' | 'error';
 
@@ -107,9 +86,16 @@ function NovaPendenciaModal({
 
   const handleFotoSelected = async (file: File | undefined) => {
     if (!file) return;
-    const dataUrl = await normalizeImage(file);
-    setFoto(dataUrl);
-    capturarGeo();
+    try {
+      const dataUrl = await normalizarFoto(file);
+      setFoto(dataUrl);
+      capturarGeo();
+    } catch (err) {
+      // Antes não havia tratamento nenhum: a foto que não abria simplesmente
+      // não aparecia, sem aviso, e o técnico ficava sem saber por quê.
+      console.error('[Vistoria] Foto ilegível:', err);
+      toast({ title: 'Não foi possível usar esta foto', description: mensagemErroFoto(err), variant: 'destructive' });
+    }
   };
 
   const toggleProblema = (item: string) =>
