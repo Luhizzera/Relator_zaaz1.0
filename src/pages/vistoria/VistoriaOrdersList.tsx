@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   // `Map` sai aliasado de propósito: sem isso o ícone sombreia o `Map` nativo
   // do JavaScript e `new Map()` para de compilar dentro deste arquivo.
@@ -370,6 +370,12 @@ function DelegarTecnicoVistoriaModal({
   );
 }
 
+/** Status vindo da URL — os cards de Vistoria do painel do técnico abrem a lista por aqui. */
+function statusDaUrl(search: string): StatusOrdemVistoria | 'todas' {
+  const status = new URLSearchParams(search).get('status');
+  return status && status in STATUS_VISTORIA_LABEL ? (status as StatusOrdemVistoria) : 'todas';
+}
+
 export default function VistoriaOrdersList() {
   const navigate = useNavigate();
   const { canManageOrders } = useAuth();
@@ -378,7 +384,10 @@ export default function VistoriaOrdersList() {
   const [showNovaRota, setShowNovaRota] = useState(false);
   const [ordemParaDelegar, setOrdemParaDelegar] = useState<OrdemVistoria | null>(null);
   const [showExport, setShowExport] = useState(false);
-  const [filtroStatus, setFiltroStatus] = useState<StatusOrdemVistoria | 'todas'>('todas');
+  const location = useLocation();
+  const [filtroStatus, setFiltroStatus] = useState<StatusOrdemVistoria | 'todas'>(() => statusDaUrl(location.search));
+  // O React Router não remonta a tela quando só a query string muda.
+  useEffect(() => { setFiltroStatus(statusDaUrl(location.search)); }, [location.search]);
   const [filtroEquipe, setFiltroEquipe] = useState('');
   const [busca, setBusca] = useState('');
   // Os pontos vivem nas pendências, não nas rotas — o backlog é carregado

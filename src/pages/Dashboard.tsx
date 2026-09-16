@@ -44,9 +44,24 @@ const STATUS_VISTORIA_COLOR: Record<string, string> = {
   cancelada: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400',
 };
 
-function StatCard({ icon: Icon, label, value, accent }: any) {
+/**
+ * Com `onClick`, o card vira atalho para a lista já filtrada — o mesmo que o
+ * painel do gestor faz (ver StatCard em ManutencaoDashboard.tsx). Este aqui
+ * era só um <div>: no painel do técnico, tocar em "Abertas" não fazia nada,
+ * em nenhum aparelho. No desktop "funcionava" porque quem testava era gestor,
+ * e gestor vê o outro painel.
+ */
+function StatCard({ icon: Icon, label, value, accent, onClick }: any) {
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3 shadow-sm">
+    <Tag
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={cn(
+        'bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex items-center gap-3 shadow-sm w-full text-left',
+        onClick && 'hover:border-amber-300 hover:shadow-md transition-all cursor-pointer active:scale-[0.98]',
+      )}
+    >
       <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', accent)}>
         <Icon className="icon-md" />
       </div>
@@ -54,7 +69,7 @@ function StatCard({ icon: Icon, label, value, accent }: any) {
         <p className="text-2xl font-black text-slate-800 dark:text-slate-100 leading-none">{value}</p>
         <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mt-1">{label}</p>
       </div>
-    </div>
+    </Tag>
   );
 }
 
@@ -303,6 +318,127 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Manutenção primeiro: é a fila de trabalho do técnico, e no celular o
+          que fica abaixo da dobra some. Vistoria continua logo abaixo dela, de
+          propósito; Relatórios, que é consulta, vai para o fim. */}
+      <section>
+        <SectionHeader
+          icon={Wrench}
+          title="Manutenção"
+          // Só o Técnico de Manutenção tem OS "aguardando" — o Técnico LA só
+          // acompanha o que abriu, nada ali depende de uma ação dele.
+          badge={!isTecnicoLA && statsManutencao.naoIniciadas > 0 ? statsManutencao.naoIniciadas : undefined}
+          accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+          action={
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportarManutencaoExcel}
+                disabled={exportandoManutencao}
+                title={filtrosManutencaoAtivos ? 'Exporta só as OS que passam pelos filtros aplicados' : 'Exporta todas as OS'}
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-60"
+              >
+                {exportandoManutencao ? <Loader2 className="icon-sm animate-spin" /> : <Sheet className="icon-sm" />} Excel
+              </button>
+              {/* Lista completa fica numa tela à parte — aqui é só o resumo do dia a dia. */}
+              <button
+                onClick={() => navigate('/manutencao/ordens')}
+                className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
+              >
+                Minhas Ordens <ArrowRight className="icon-sm" />
+              </button>
+            </div>
+          }
+        />
+        {loadingManutencao ? (
+          <div className="flex items-center justify-center py-14 text-slate-400">
+            <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <FiltrosBar
+              filtros={filtrosManutencao}
+              setFiltro={setFiltroManutencao}
+              limpar={() => setFiltrosManutencao(FILTROS_DASHBOARD_VAZIOS)}
+              ativos={filtrosManutencaoAtivos}
+              tipos={tiposManutencaoDisponiveis}
+              tecnicos={[]}
+              cidades={cidadesManutencaoDisponiveis}
+              mostrarTecnico={false}
+            />
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard icon={ClipboardList} label="Abertas" value={statsManutencao.abertas} onClick={() => navigate('/manutencao/ordens?grupo=abertas')} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
+              <StatCard icon={Clock} label="Em andamento" value={statsManutencao.emAndamento} onClick={() => navigate('/manutencao/ordens?grupo=andamento')} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
+              <StatCard icon={ShieldAlert} label="Finalizadas" value={statsManutencao.finalizadas} onClick={() => navigate('/manutencao/ordens?status=finalizada')} accent="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
+              <StatCard icon={CheckCircle2} label="Concluídas" value={statsManutencao.concluidas} onClick={() => navigate('/manutencao/ordens?grupo=concluidas')} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
+            </div>
+
+            <OrdensRecentes
+              orders={ordensManutencaoFiltradas}
+              navigate={navigate}
+              vazio="Nenhuma OS aberta ou delegada a você ainda."
+              isTecnicoManutencao={isTecnicoManutencao}
+            />
+          </div>
+        )}
+      </section>
+
+      {isTecnicoManutencao && (
+        <section>
+          <SectionHeader
+            icon={RouteIcon}
+            title="Vistoria"
+            badge={statsVistoria.abertas > 0 ? statsVistoria.abertas : undefined}
+            accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+            action={
+              <button
+                onClick={() => navigate('/vistoria/ordens')}
+                className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
+              >
+                Minhas Rotas <ArrowRight className="icon-sm" />
+              </button>
+            }
+          />
+          {loadingVistoria ? (
+            <div className="flex items-center justify-center py-14 text-slate-400">
+              <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <StatCard icon={ClipboardList} label="Abertas" value={statsVistoria.abertas} onClick={() => navigate('/vistoria/ordens?status=aberta')} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
+                <StatCard icon={Clock} label="Em andamento" value={statsVistoria.emAndamento} onClick={() => navigate('/vistoria/ordens?status=em_andamento')} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
+                <StatCard icon={CheckCircle2} label="Concluídas" value={statsVistoria.concluidas} onClick={() => navigate('/vistoria/ordens?status=concluida')} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+                <h2 className="text-sm font-black text-slate-700 dark:text-slate-200 mb-4">Rotas recentes</h2>
+                <div className="space-y-2">
+                  {ordensVistoria.length === 0 && <p className="text-xs text-slate-400">Nenhuma rota de vistoria atribuída a você ainda.</p>}
+                  {ordensVistoria.slice(0, 6).map((o) => (
+                    <button
+                      key={o.id}
+                      onClick={() => navigate(`/vistoria/ordens/${o.id}/execucao`)}
+                      className="w-full flex items-center justify-between gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{o.numero} — {o.titulo}</p>
+                        <p className="text-[11px] text-slate-400 flex items-center gap-1 truncate">
+                          <MapPin size={10} /> {o.equipe || 'Sem equipe'} • {o.pendencias.length} pendência(s)
+                        </p>
+                      </div>
+                      <span className={cn('text-[10px] font-black px-2 py-1 rounded-full shrink-0', STATUS_VISTORIA_COLOR[o.status])}>
+                        {STATUS_VISTORIA_LABEL[o.status]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       <section>
         <SectionHeader icon={FileText} title="Relatórios" accent="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
       {loadingOrders ? (
@@ -313,10 +449,10 @@ export default function Dashboard() {
         <div className="space-y-4">
           {/* Cards de estatística */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <StatCard icon={ClipboardList} label="Total de OS" value={stats.total} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
-            <StatCard icon={Clock} label="Em andamento" value={stats.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
-            <StatCard icon={CheckCircle2} label="Concluídas" value={stats.concluidas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
-            <StatCard icon={Download} label="Exportadas" value={stats.exportadas} accent="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
+            <StatCard icon={ClipboardList} label="Total de OS" value={stats.total} onClick={() => navigate('/ordens')} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
+            <StatCard icon={Clock} label="Em andamento" value={stats.emAndamento} onClick={() => navigate('/ordens?status=em_andamento')} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
+            <StatCard icon={CheckCircle2} label="Concluídas" value={stats.concluidas} onClick={() => navigate('/ordens?status=concluidas')} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
+            <StatCard icon={Download} label="Exportadas" value={stats.exportadas} onClick={() => navigate('/ordens?status=exportada')} accent="bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" />
             <StatCard icon={Camera} label="Fotos registradas" value={stats.totalFotos} accent="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
           </div>
 
@@ -375,124 +511,6 @@ export default function Dashboard() {
         </div>
       )}
       </section>
-
-      <section>
-        <SectionHeader
-          icon={Wrench}
-          title="Manutenção"
-          // Só o Técnico de Manutenção tem OS "aguardando" — o Técnico LA só
-          // acompanha o que abriu, nada ali depende de uma ação dele.
-          badge={!isTecnicoLA && statsManutencao.naoIniciadas > 0 ? statsManutencao.naoIniciadas : undefined}
-          accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
-          action={
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleExportarManutencaoExcel}
-                disabled={exportandoManutencao}
-                title={filtrosManutencaoAtivos ? 'Exporta só as OS que passam pelos filtros aplicados' : 'Exporta todas as OS'}
-                className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-60"
-              >
-                {exportandoManutencao ? <Loader2 className="icon-sm animate-spin" /> : <Sheet className="icon-sm" />} Excel
-              </button>
-              {/* Lista completa fica numa tela à parte — aqui é só o resumo do dia a dia. */}
-              <button
-                onClick={() => navigate('/manutencao/ordens')}
-                className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
-              >
-                Minhas Ordens <ArrowRight className="icon-sm" />
-              </button>
-            </div>
-          }
-        />
-        {loadingManutencao ? (
-          <div className="flex items-center justify-center py-14 text-slate-400">
-            <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <FiltrosBar
-              filtros={filtrosManutencao}
-              setFiltro={setFiltroManutencao}
-              limpar={() => setFiltrosManutencao(FILTROS_DASHBOARD_VAZIOS)}
-              ativos={filtrosManutencaoAtivos}
-              tipos={tiposManutencaoDisponiveis}
-              tecnicos={[]}
-              cidades={cidadesManutencaoDisponiveis}
-              mostrarTecnico={false}
-            />
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatCard icon={ClipboardList} label="Abertas" value={statsManutencao.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
-              <StatCard icon={Clock} label="Em andamento" value={statsManutencao.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
-              <StatCard icon={ShieldAlert} label="Finalizadas" value={statsManutencao.finalizadas} accent="bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" />
-              <StatCard icon={CheckCircle2} label="Concluídas" value={statsManutencao.concluidas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
-            </div>
-
-            <OrdensRecentes
-              orders={ordensManutencaoFiltradas}
-              navigate={navigate}
-              vazio="Nenhuma OS aberta ou delegada a você ainda."
-              isTecnicoManutencao={isTecnicoManutencao}
-            />
-          </div>
-        )}
-      </section>
-
-      {isTecnicoManutencao && (
-        <section>
-          <SectionHeader
-            icon={RouteIcon}
-            title="Vistoria"
-            badge={statsVistoria.abertas > 0 ? statsVistoria.abertas : undefined}
-            accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
-            action={
-              <button
-                onClick={() => navigate('/vistoria/ordens')}
-                className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
-              >
-                Minhas Rotas <ArrowRight className="icon-sm" />
-              </button>
-            }
-          />
-          {loadingVistoria ? (
-            <div className="flex items-center justify-center py-14 text-slate-400">
-              <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <StatCard icon={ClipboardList} label="Abertas" value={statsVistoria.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" />
-                <StatCard icon={Clock} label="Em andamento" value={statsVistoria.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" />
-                <StatCard icon={CheckCircle2} label="Concluídas" value={statsVistoria.concluidas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" />
-              </div>
-
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
-                <h2 className="text-sm font-black text-slate-700 dark:text-slate-200 mb-4">Rotas recentes</h2>
-                <div className="space-y-2">
-                  {ordensVistoria.length === 0 && <p className="text-xs text-slate-400">Nenhuma rota de vistoria atribuída a você ainda.</p>}
-                  {ordensVistoria.slice(0, 6).map((o) => (
-                    <button
-                      key={o.id}
-                      onClick={() => navigate(`/vistoria/ordens/${o.id}/execucao`)}
-                      className="w-full flex items-center justify-between gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{o.numero} — {o.titulo}</p>
-                        <p className="text-[11px] text-slate-400 flex items-center gap-1 truncate">
-                          <MapPin size={10} /> {o.equipe || 'Sem equipe'} • {o.pendencias.length} pendência(s)
-                        </p>
-                      </div>
-                      <span className={cn('text-[10px] font-black px-2 py-1 rounded-full shrink-0', STATUS_VISTORIA_COLOR[o.status])}>
-                        {STATUS_VISTORIA_LABEL[o.status]}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
 
       <NovaOSModal
         isOpen={showNovaOSModal}

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Search, Plus, Trash2, MapPin, Camera, Loader2, ChevronDown, Sheet,
 } from 'lucide-react';
@@ -27,13 +27,28 @@ const STATUS_COLOR: Record<OrdemStatus, string> = {
   cancelada: 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
 };
 
+/**
+ * Filtro de status vindo da URL — é por aqui que os cards do painel do técnico
+ * abrem a lista já filtrada. "concluidas" é um grupo, não um status: o card do
+ * painel soma concluídas E exportadas (exportar é o passo seguinte de
+ * concluir), e a lista precisa do mesmo recorte para o número bater.
+ */
+type FiltroStatus = OrdemStatus | 'todas' | 'concluidas';
+
+function statusDaUrl(search: string): FiltroStatus {
+  const status = new URLSearchParams(search).get('status');
+  if (status === 'concluidas' || (status && status in STATUS_LABEL)) return status as FiltroStatus;
+  return 'todas';
+}
+
 export default function OrdersList() {
   const { orders, loadingOrders, refreshOrders, createOrder, deleteOrder, setOrderStatus } = useOrders();
   const { canManageOrders } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<OrdemStatus | 'todas'>('todas');
+  const [statusFilter, setStatusFilter] = useState<FiltroStatus>(() => statusDaUrl(location.search));
   const [tecnicoFilter, setTecnicoFilter] = useState<string>('todos');
   const [toDelete, setToDelete] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -42,6 +57,10 @@ export default function OrdersList() {
 
   useEffect(() => { refreshOrders(); }, [refreshOrders]);
 
+  // Mesmo motivo de ManutencaoOrdersList: o React Router não remonta a tela
+  // quando só a query string muda, então o filtro precisa acompanhar a URL.
+  useEffect(() => { setStatusFilter(statusDaUrl(location.search)); }, [location.search]);
+
   const tecnicos = useMemo(
     () => Array.from(new Set(orders.map((o) => o.tecnico_nome).filter(Boolean))),
     [orders],
@@ -49,7 +68,9 @@ export default function OrdersList() {
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
-      if (statusFilter !== 'todas' && o.status !== statusFilter) return false;
+      if (statusFilter === 'concluidas') {
+        if (o.status !== 'concluida' && o.status !== 'exportada') return false;
+      } else if (statusFilter !== 'todas' && o.status !== statusFilter) return false;
       if (tecnicoFilter !== 'todos' && o.tecnico_nome !== tecnicoFilter) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -159,6 +180,9 @@ export default function OrdersList() {
             {Object.entries(STATUS_LABEL).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
             ))}
+            {/* Precisa existir como opção: vindo do card "Concluídas", o select
+                mostraria em branco um valor que não estivesse na lista. */}
+            <option value="concluidas">Concluídas + exportadas</option>
           </select>
           <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         </div>
