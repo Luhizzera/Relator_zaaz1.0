@@ -11,7 +11,7 @@ import { toast } from '@/hooks/use-toast';
 import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { createManutencaoOrder, addFotoManutencao } from '@/lib/manutencaoService';
 import {
-  PrioridadeOS, PRIORIDADE_LABEL, PROBLEMAS_CTO_GRUPOS, deserializeProblemas, serializeProblemas,
+  PrioridadeOS, PRIORIDADE_LABEL, PROBLEMAS_CTO_GRUPOS, DICA_PROBLEMA_CTO, deserializeProblemas, serializeProblemas,
 } from '@/types/manutencao';
 import { useAuth } from '@/contexts/AuthContext';
 import { BackButton } from '@/components/BackButton';
@@ -633,6 +633,9 @@ export default function NovaOrdemManutencao() {
                           />
                           <span className="text-sm text-slate-700 dark:text-slate-200 leading-tight">
                             {item}
+                            {DICA_PROBLEMA_CTO[item] && (
+                              <span className="text-slate-400 dark:text-slate-500"> ({DICA_PROBLEMA_CTO[item]})</span>
+                            )}
                           </span>
                         </label>
                       ))}
