@@ -189,11 +189,9 @@ export const PROBLEMAS_CTO_GRUPOS: { grupo: string; itens: string[] }[] = [
       'CTO sem tampa',
       'CTO solta do poste',
       'CTO apresenta infestação de formigas',
-      // As duas abaixo são casos diferentes e ficam lado a lado de propósito:
-      // uma é a falta da plaqueta física, a outra é a caixa sem nome. O
-      // "(sem nome)" faz parte do valor gravado, para a distinção aparecer
-      // também no detalhe da OS e no relatório, e não só no formulário.
-      'CTO sem plaquetas de identificação',
+      // O "(sem nome)" faz parte do valor gravado, para a distinção aparecer
+      // também no detalhe da OS e no relatório, e não só no formulário. A falta
+      // de plaqueta física não fica aqui: ela foi para o grupo Rede.
       'CTO sem identificação (sem nome)',
     ],
   },
@@ -214,6 +212,12 @@ export const PROBLEMAS_CTO_GRUPOS: { grupo: string; itens: string[] }[] = [
       'Drop com conector roubado',
       'Drop atenuado',
     ],
+  },
+  {
+    // Plaqueta de identificação é da rede, e não só da caixa — por isso não
+    // fica no grupo CTO.
+    grupo: 'Rede',
+    itens: ['Rede sem identificação (sem plaqueta)'],
   },
 ];
 
@@ -241,12 +245,13 @@ export const SOLUCAO_PROBLEMA_CTO: Record<string, string> = {
   'CTO sem tampa': 'Tampa da CTO reposta',
   'CTO solta do poste': 'CTO fixada no poste',
   'CTO apresenta infestação de formigas': 'Infestação eliminada e CTO vedada',
-  'CTO sem plaquetas de identificação': 'Plaquetas de identificação instaladas na CTO',
   'CTO sem identificação (sem nome)': 'Nome da CTO identificado e cadastrado',
-  // Nomes usados até 17/09, ainda gravados em OS antigas. Ao duplicar uma
-  // delas, o problema continua gerando a solução certa, em vez de virar item
-  // de checklist com o próprio texto do problema.
-  'CTO não identificada': 'Plaquetas de identificação instaladas na CTO',
+  'Rede sem identificação (sem plaqueta)': 'Plaqueta de identificação instalada na rede',
+  // Nomes anteriores, ainda gravados em OS antigas. Ao duplicar uma delas, o
+  // problema continua gerando a solução atual, em vez de virar item de
+  // checklist com o próprio texto do problema.
+  'CTO não identificada': 'Plaqueta de identificação instalada na rede',
+  'CTO sem plaquetas de identificação': 'Plaqueta de identificação instalada na rede',
   'CTO sem identificação': 'Nome da CTO identificado e cadastrado',
   'Splitter quebrado': 'Splitter substituído',
   'Splitter atenuado': 'Splitter substituído/regulado',
