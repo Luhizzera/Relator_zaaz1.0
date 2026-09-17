@@ -193,6 +193,10 @@ export const PROBLEMAS_CTO_GRUPOS: { grupo: string; itens: string[] }[] = [
       // campo mas não foi localizada no projeto. A ação de campo é identificar,
       // não reparar — daí a solução correspondente.
       'CTO não identificada',
+      // Diferente da anterior: a caixa foi localizada, mas está sem a
+      // plaqueta/etiqueta física — o mesmo caso de "Drop sem anilha de
+      // identificação", só que na CTO. A ação é instalar a identificação.
+      'CTO sem identificação',
     ],
   },
   {
@@ -240,6 +244,7 @@ export const SOLUCAO_PROBLEMA_CTO: Record<string, string> = {
   'CTO solta do poste': 'CTO fixada no poste',
   'CTO apresenta infestação de formigas': 'Infestação eliminada e CTO vedada',
   'CTO não identificada': 'CTO identificada e cadastrada',
+  'CTO sem identificação': 'Identificação instalada na CTO',
   'Splitter quebrado': 'Splitter substituído',
   'Splitter atenuado': 'Splitter substituído/regulado',
   'Splitter roubado': 'Splitter reinstalado',
