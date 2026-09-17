@@ -189,11 +189,12 @@ export const PROBLEMAS_CTO_GRUPOS: { grupo: string; itens: string[] }[] = [
       'CTO sem tampa',
       'CTO solta do poste',
       'CTO apresenta infestação de formigas',
-      // CTO sem nome em campo — sem plaqueta ou etiqueta. Substituiu "CTO não
-      // identificada": as duas lado a lado liam como a mesma coisa e dividiam
-      // a contagem. A observação "(CTOs sem nome)" é só de tela (ver
-      // DICA_PROBLEMA_CTO); o valor gravado continua curto.
-      'CTO sem identificação',
+      // As duas abaixo são casos diferentes e ficam lado a lado de propósito:
+      // uma é a falta da plaqueta física, a outra é a caixa sem nome. O
+      // "(sem nome)" faz parte do valor gravado, para a distinção aparecer
+      // também no detalhe da OS e no relatório, e não só no formulário.
+      'CTO sem plaquetas de identificação',
+      'CTO sem identificação (sem nome)',
     ],
   },
   {
@@ -215,15 +216,6 @@ export const PROBLEMAS_CTO_GRUPOS: { grupo: string; itens: string[] }[] = [
     ],
   },
 ];
-
-/**
- * Observação exibida ao lado da opção, sem fazer parte do valor gravado.
- * Assim o texto de apoio pode mudar sem mexer em OS antigas nem no que o
- * relatório conta.
- */
-export const DICA_PROBLEMA_CTO: Record<string, string> = {
-  'CTO sem identificação': 'CTOs sem nome',
-};
 
 /** Lista achatada — pra código que só precisa iterar/validar sem se importar com o agrupamento (ex: `SOLUCAO_PROBLEMA_CTO`). */
 export const PROBLEMAS_CTO = PROBLEMAS_CTO_GRUPOS.flatMap((g) => g.itens);
@@ -249,11 +241,13 @@ export const SOLUCAO_PROBLEMA_CTO: Record<string, string> = {
   'CTO sem tampa': 'Tampa da CTO reposta',
   'CTO solta do poste': 'CTO fixada no poste',
   'CTO apresenta infestação de formigas': 'Infestação eliminada e CTO vedada',
-  'CTO sem identificação': 'Identificação instalada na CTO',
-  // Legado: a opção saiu da lista em 17/09, mas OS antigas ainda podem trazer
-  // o texto (ao duplicar uma OS, por exemplo). Sem esta linha, o próprio
-  // problema viraria item de checklist.
-  'CTO não identificada': 'Identificação instalada na CTO',
+  'CTO sem plaquetas de identificação': 'Plaquetas de identificação instaladas na CTO',
+  'CTO sem identificação (sem nome)': 'Nome da CTO identificado e cadastrado',
+  // Nomes usados até 17/09, ainda gravados em OS antigas. Ao duplicar uma
+  // delas, o problema continua gerando a solução certa, em vez de virar item
+  // de checklist com o próprio texto do problema.
+  'CTO não identificada': 'Plaquetas de identificação instaladas na CTO',
+  'CTO sem identificação': 'Nome da CTO identificado e cadastrado',
   'Splitter quebrado': 'Splitter substituído',
   'Splitter atenuado': 'Splitter substituído/regulado',
   'Splitter roubado': 'Splitter reinstalado',

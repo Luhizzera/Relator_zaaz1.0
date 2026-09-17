@@ -11,7 +11,7 @@ import {
 } from '@/lib/vistoriaOfflineQueue';
 import { getSignedFotoVistoriaUrl } from '@/lib/supabaseClient';
 import { OrdemVistoria, PendenciaVistoria, STATUS_VISTORIA_LABEL } from '@/types/vistoria';
-import { PROBLEMAS_CTO_GRUPOS, DICA_PROBLEMA_CTO, serializeProblemas, deserializeProblemas } from '@/types/manutencao';
+import { PROBLEMAS_CTO_GRUPOS, serializeProblemas, deserializeProblemas } from '@/types/manutencao';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
 import { BackButton } from '@/components/BackButton';
@@ -246,9 +246,6 @@ function NovaPendenciaModal({
                           )}
                         >
                           {item}
-                          {DICA_PROBLEMA_CTO[item] && (
-                            <span className={cn('font-normal', ativo ? 'text-amber-100' : 'text-slate-400')}> ({DICA_PROBLEMA_CTO[item]})</span>
-                          )}
                         </button>
                       );
                     })}
