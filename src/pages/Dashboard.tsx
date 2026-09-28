@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ClipboardList, CheckCircle2, Clock, Download, Camera, MapPin, Plus, Loader2, Menu, LogOut,
-  FileText, Wrench, ShieldAlert, ArrowRight, Sheet, Route as RouteIcon,
+  FileText, Wrench, ShieldAlert, ArrowRight, Sheet, Route as RouteIcon, SignalHigh,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useOrders } from '@/contexts/OrdersContext';
@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { listManutencaoOrders } from '@/lib/manutencaoService';
 import { listOrdensVistoria } from '@/lib/vistoriaService';
+import { listOrdensCertificacao } from '@/lib/certificacaoService';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
 import { exportToXlsx } from '@/lib/xlsxExport';
 import { STATUS_LABEL as STATUS_LABEL_MANUTENCAO, PRIORIDADE_LABEL, tempoEmAtendimento } from '@/types/manutencao';
@@ -256,6 +257,34 @@ export default function Dashboard() {
     return { abertas, emAndamento, concluidas };
   }, [ordensVistoria]);
 
+  // Certificação — mesma regra de visibilidade da vistoria: a RLS já devolve
+  // só as OS do técnico, então não há recorte a fazer aqui.
+  const [loadingCertificacao, setLoadingCertificacao] = useState(true);
+  const [ordensCertificacao, setOrdensCertificacao] = useState([]);
+
+  const carregarCertificacao = () => {
+    setLoadingCertificacao(true);
+    listOrdensCertificacao()
+      .then(setOrdensCertificacao)
+      .catch((err) => console.error('[Dashboard] Erro ao carregar certificações:', err))
+      .finally(() => setLoadingCertificacao(false));
+  };
+
+  useEffect(() => { if (isTecnicoManutencao) carregarCertificacao(); }, [isTecnicoManutencao]);
+  useRealtimeRefresh(
+    [{ table: 'ordens_certificacao' }, { table: 'pontos_certificacao' }],
+    () => { if (isTecnicoManutencao) carregarCertificacao(); },
+  );
+
+  // Um status por card, e não grupos: assim o número do card é exatamente o
+  // que a lista mostra quando ele é tocado.
+  const statsCertificacao = useMemo(() => ({
+    abertas: ordensCertificacao.filter((o) => o.status === 'aberta').length,
+    emAndamento: ordensCertificacao.filter((o) => o.status === 'em_andamento').length,
+    devolvidas: ordensCertificacao.filter((o) => o.status === 'reaberta').length,
+    certificadas: ordensCertificacao.filter((o) => o.status === 'aprovada').length,
+  }), [ordensCertificacao]);
+
   const handleSelectRelatorio = async () => {
     setShowNovaOSModal(false);
     const id = await createOrder();
@@ -306,6 +335,16 @@ export default function Dashboard() {
               className={iconChipButtonClass}
             >
               <RouteIcon className="icon-md" />
+            </button>
+          )}
+          {isTecnicoManutencao && (
+            <button
+              onClick={() => navigate('/certificacao/ordens')}
+              title="Certificação"
+              aria-label="Certificação"
+              className={iconChipButtonClass}
+            >
+              <SignalHigh className="icon-md" />
             </button>
           )}
           <button
@@ -434,6 +473,40 @@ export default function Dashboard() {
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {isTecnicoManutencao && (
+        <section>
+          <SectionHeader
+            icon={SignalHigh}
+            title="Certificação"
+            // Abertas e devolvidas são as que dependem de uma ação dele.
+            badge={statsCertificacao.abertas + statsCertificacao.devolvidas > 0
+              ? statsCertificacao.abertas + statsCertificacao.devolvidas
+              : undefined}
+            accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+            action={
+              <button
+                onClick={() => navigate('/certificacao/ordens')}
+                className="flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
+              >
+                Minhas Certificações <ArrowRight className="icon-sm" />
+              </button>
+            }
+          />
+          {loadingCertificacao ? (
+            <div className="flex items-center justify-center py-14 text-slate-400">
+              <Loader2 className="icon-md animate-spin mr-2" /> Carregando...
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard icon={ClipboardList} label="Abertas" value={statsCertificacao.abertas} accent="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" onClick={() => navigate('/certificacao/ordens?status=aberta')} />
+              <StatCard icon={Clock} label="Em andamento" value={statsCertificacao.emAndamento} accent="bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" onClick={() => navigate('/certificacao/ordens?status=em_andamento')} />
+              <StatCard icon={ShieldAlert} label="Devolvidas" value={statsCertificacao.devolvidas} accent="bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400" onClick={() => navigate('/certificacao/ordens?status=reaberta')} />
+              <StatCard icon={CheckCircle2} label="Certificadas" value={statsCertificacao.certificadas} accent="bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" onClick={() => navigate('/certificacao/ordens?status=aprovada')} />
             </div>
           )}
         </section>
