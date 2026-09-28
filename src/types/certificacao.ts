@@ -145,6 +145,23 @@ export function resumoCertificacao(ordem: OrdemCertificacao): ResumoCertificacao
   };
 }
 
+/**
+ * Lê o que foi digitado num campo de sinal. Aceita vírgula (teclado brasileiro)
+ * e o sinal de menos.
+ *
+ * Não completa o sinal sozinho: "18,4" vira +18,4 e não -18,4. Potência óptica
+ * em CTO é negativa, então um valor positivo é quase sempre erro de digitação —
+ * mas adivinhar o sinal esconderia esse erro justamente onde ele muda o
+ * resultado (qualquer positivo passa por qualquer limite negativo). Quem chama
+ * avisa; ver o alerta de sinal positivo na tela de medição.
+ */
+export function parseDbm(texto: string): number | null {
+  const limpo = texto.trim().replace(',', '.');
+  if (!/^-?\d+(\.\d+)?$/.test(limpo)) return null;
+  const valor = Number(limpo);
+  return Number.isFinite(valor) ? valor : null;
+}
+
 /** Uma casa decimal e vírgula — como o técnico lê no powermeter e como sai no PDF. */
 export const formatarDbm = (valor: number | null | undefined) =>
   valor == null ? '—' : `${valor.toFixed(2).replace('.', ',')} dBm`;

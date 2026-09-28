@@ -23,6 +23,8 @@ import MinhaEquipe from '@/pages/manutencao/MinhaEquipe';
 import VistoriaOrdersList from '@/pages/vistoria/VistoriaOrdersList';
 import VistoriaExecucaoMobile from '@/pages/vistoria/VistoriaExecucaoMobile';
 import VistoriaBacklogMap from '@/pages/vistoria/VistoriaBacklogMap';
+import CertificacaoOrdersList from '@/pages/certificacao/CertificacaoOrdersList';
+import CertificacaoDetalhe from '@/pages/certificacao/CertificacaoDetalhe';
 import { AppSidebar } from '@/components/AppSidebar';
 import { Toaster } from '@/components/ui/toaster';
 
@@ -72,6 +74,11 @@ function AppRoutes() {
       <Route path="/vistoria/ordens" element={<RequireAuth><VistoriaOrdersList /></RequireAuth>} />
       <Route path="/vistoria/ordens/:id/execucao" element={<RequireAuth><VistoriaExecucaoMobile /></RequireAuth>} />
       <Route path="/vistoria/backlog" element={<RequireAuth><VistoriaBacklogMap /></RequireAuth>} />
+      <Route path="/certificacao/ordens" element={<RequireAuth><CertificacaoOrdersList /></RequireAuth>} />
+      {/* Uma tela de detalhe só, para os dois papéis: o técnico mede os pontos
+          e o gestor confere os mesmos pontos. Duplicar a lista em duas telas
+          seria duas versões da mesma coisa para manter iguais. */}
+      <Route path="/certificacao/ordens/:id" element={<RequireAuth><CertificacaoDetalhe /></RequireAuth>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { X, LayoutDashboard, ClipboardList, Wrench, ListChecks, Users, Users2, LogOut, Route as RouteIcon } from 'lucide-react';
+import { X, LayoutDashboard, ClipboardList, Wrench, ListChecks, Users, Users2, LogOut, Route as RouteIcon, SignalHigh } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -36,6 +36,7 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     { to: '/manutencao/ordens', label: 'Ordens de Manutenção', icon: ListChecks, sub: true },
     ...(canManageOrders ? [{ to: '/manutencao/equipe', label: isGestor ? 'Equipes' : 'Minha Equipe', icon: Users2, sub: true }] : []),
     { to: '/vistoria/ordens', label: 'Vistoria', icon: RouteIcon },
+    { to: '/certificacao/ordens', label: 'Certificação', icon: SignalHigh },
     ...(isGestor ? [{ to: '/usuarios', label: 'Usuários', icon: Users }] : []),
   ];
 
