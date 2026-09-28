@@ -460,3 +460,89 @@ export async function deleteFotoVistoriaFromStorage(storagePath: string): Promis
   const { error } = await supabase.storage.from(FOTOS_VISTORIA_BUCKET).remove([storagePath]);
   if (error) console.error('[Supabase] Erro ao remover foto de vistoria do storage:', error);
 }
+
+// ---- Domínio de Certificação (obra nova: sinal esperado x sinal medido) —
+// espelha supabase/migrations/0023_certificacao.sql. Ver src/types/certificacao.ts
+// para o shape usado pela UI e src/lib/certificacaoService.ts para o mapeamento. ----
+
+export type StatusOrdemCertificacaoRow =
+  'aberta' | 'em_andamento' | 'finalizada' | 'aprovada' | 'reaberta' | 'cancelada';
+
+export interface OrdemCertificacaoRow {
+  id: string;
+  numero: string;
+  titulo: string;
+  status: StatusOrdemCertificacaoRow;
+  /** Quanto o medido pode ficar pior que o esperado e ainda passar. */
+  margem_db: number;
+  equipe_id: string | null;
+  tecnico_id: string | null;
+  responsavel_id: string | null;
+  data_prevista: string | null;
+  observacoes: string | null;
+  aprovado_por: string | null;
+  aprovado_em: string | null;
+  motivo_devolucao: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PontoCertificacaoRow {
+  id: string;
+  ordem_certificacao_id: string;
+  nome_cto: string;
+  latitude: number;
+  longitude: number;
+  sinal_esperado_dbm: number;
+  ordem_index: number;
+  sinal_medido_dbm: number | null;
+  storage_path: string | null;
+  observacao: string | null;
+  medido_por: string | null;
+  medido_em: string | null;
+  refazer: boolean;
+  motivo_refazer: string | null;
+  created_at: string;
+}
+
+const FOTOS_CERTIFICACAO_BUCKET = 'fotos-certificacao';
+
+/** Gera uma URL assinada (1h) para exibir a foto privada de um ponto de certificação. */
+export async function getSignedFotoCertificacaoUrl(storagePath: string): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(FOTOS_CERTIFICACAO_BUCKET)
+    .createSignedUrl(storagePath, 60 * 60);
+  if (error) {
+    console.error('[Supabase] Erro ao assinar URL da foto de certificação:', error);
+    return null;
+  }
+  return data?.signedUrl ?? null;
+}
+
+/**
+ * Sobe a foto do ponto (data URL) e devolve o caminho salvo. O caminho é fixo
+ * por ponto (`{ordem}/{ponto}.jpg`) com upsert: uma medição refeita depois de
+ * devolução substitui a foto antiga em vez de deixar as duas no bucket, sem
+ * ninguém saber qual vale.
+ */
+export async function uploadFotoCertificacao(
+  dataUrl: string,
+  ordemCertificacaoId: string,
+  pontoId: string,
+): Promise<string> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const path = `${ordemCertificacaoId}/${pontoId}.jpg`;
+
+  const { error } = await supabase.storage.from(FOTOS_CERTIFICACAO_BUCKET).upload(path, blob, {
+    contentType: 'image/jpeg',
+    upsert: true,
+  });
+  if (error) throw error;
+  return path;
+}
+
+export async function deleteFotoCertificacaoFromStorage(storagePath: string): Promise<void> {
+  const { error } = await supabase.storage.from(FOTOS_CERTIFICACAO_BUCKET).remove([storagePath]);
+  if (error) console.error('[Supabase] Erro ao remover foto de certificação do storage:', error);
+}
