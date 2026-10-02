@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Loader2, MapPin, Camera, Image as ImageIcon, X, Check, AlertTriangle, RotateCcw, SignalHigh,
-  Maximize2, CalendarClock,
+  Maximize2, CalendarClock, FileDown,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -22,6 +22,7 @@ import {
   aprovarCertificacao, devolverCertificacao, cancelarCertificacao,
 } from '@/lib/certificacaoService';
 import { Modal } from '@/components/Modal';
+import { exportCertificacaoPdf } from '@/lib/certificacaoPdfEngine';
 
 const RESULTADO_COR: Record<ResultadoPonto, string> = {
   pendente: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
@@ -478,6 +479,7 @@ export default function CertificacaoDetalhe() {
   const [loading, setLoading] = useState(true);
   const [pontoEmMedicao, setPontoEmMedicao] = useState<PontoCertificacao | null>(null);
   const [pontoEmDetalhe, setPontoEmDetalhe] = useState<PontoCertificacao | null>(null);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
   const [showDevolver, setShowDevolver] = useState(false);
   const [confirmarCancelar, setConfirmarCancelar] = useState(false);
   const [agindo, setAgindo] = useState(false);
@@ -506,6 +508,22 @@ export default function CertificacaoDetalhe() {
   const podeMedir = souTecnicoDaOs && isTecnicoManutencao
     && (ordem?.status === 'em_andamento' || ordem?.status === 'reaberta');
   const podeConferir = canManageOrders && ordem?.status === 'finalizada';
+
+  // O laudo sai em qualquer status: antes da aprovação ele vem marcado como
+  // prévia (ver certificacaoPdfEngine), o que é melhor do que esconder o botão
+  // de quem só quer conferir no papel antes de decidir.
+  const baixarPdf = async () => {
+    if (!ordem) return;
+    setGerandoPdf(true);
+    try {
+      await exportCertificacaoPdf(ordem);
+    } catch (err) {
+      console.error('[Certificação] Erro ao gerar PDF:', err);
+      toast({ title: 'Não foi possível gerar o PDF', description: err instanceof Error ? err.message : undefined, variant: 'destructive' });
+    } finally {
+      setGerandoPdf(false);
+    }
+  };
 
   const agir = async (acao: () => Promise<void>, sucesso: string) => {
     setAgindo(true);
@@ -546,6 +564,16 @@ export default function CertificacaoDetalhe() {
         title={ordem.numero}
         subtitle={ordem.titulo}
         backTo="/certificacao/ordens"
+        rightContent={(
+          <button
+            onClick={baixarPdf}
+            disabled={gerandoPdf}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-bold text-slate-700 dark:text-slate-200 disabled:opacity-50"
+          >
+            {gerandoPdf ? <Loader2 className="icon-sm animate-spin" /> : <FileDown className="icon-sm" />}
+            PDF
+          </button>
+        )}
       />
 
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
