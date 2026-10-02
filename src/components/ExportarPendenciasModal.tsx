@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { X, Loader2, FileSpreadsheet, Globe, Package } from 'lucide-react';
+import { Loader2, FileSpreadsheet, Globe, Package } from 'lucide-react';
 import { exportarPendencias, type FormatoExportacao, type PontoExportavel } from '@/lib/vistoriaExport';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { Modal } from '@/components/Modal';
 
 export type EscopoExportacao = 'todos' | 'atividade' | 'selecionados';
 
@@ -87,18 +88,7 @@ export function ExportarPendenciasModal({
   );
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-900">
-          <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Exportar pontos</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Fechar">
-            <X size={20} />
-          </button>
-        </div>
+    <Modal title="Exportar pontos" onClose={onClose} zClass="z-[1200]">
 
         <div className="p-5 space-y-5">
           <div>
@@ -163,7 +153,6 @@ export function ExportarPendenciasModal({
             {alvo.length === 0 ? 'Nenhum ponto no recorte' : `Exportar ${alvo.length} ponto(s)`}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

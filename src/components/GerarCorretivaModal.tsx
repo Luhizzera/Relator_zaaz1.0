@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { X, Loader2, MapPin, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Loader2, MapPin, CheckCircle2, ArrowRight } from 'lucide-react';
 import { getSignedFotoVistoriaUrl } from '@/lib/supabaseClient';
 import { gerarOSCorretivaDaPendencia } from '@/lib/vistoriaService';
 import { PendenciaBacklog, TIPOS_CORRETIVA_VISTORIA, TipoCorretivaVistoria } from '@/types/vistoria';
 import { PrioridadeOS, PRIORIDADE_LABEL, deserializeProblemas } from '@/types/manutencao';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { Modal } from '@/components/Modal';
 
 interface GerarCorretivaModalProps {
   pendencia: PendenciaBacklog;
@@ -54,21 +55,12 @@ export function GerarCorretivaModal({ pendencia, onClose, onGerada, onAbrirOrdem
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-900">
-          <div>
-            <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Gerar OS corretiva</h2>
-            <p className="text-xs text-slate-400">Vistoria {pendencia.ordemVistoriaNumero}</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Fechar">
-            <X className="icon-md" />
-          </button>
-        </div>
+    <Modal
+      title="Gerar OS corretiva"
+      subtitle={`Vistoria ${pendencia.ordemVistoriaNumero}`}
+      onClose={onClose}
+      size="sm"
+    >
 
         {ordemGerada ? (
           <div className="p-5 space-y-4 text-center">
@@ -173,7 +165,6 @@ export function GerarCorretivaModal({ pendencia, onClose, onGerada, onAbrirOrdem
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  Loader2, Camera, MapPin, PlayCircle, Flag, X, CheckCircle2, Navigation, Image as ImageIcon,
+  Loader2, Camera, MapPin, PlayCircle, Flag, CheckCircle2, Navigation, Image as ImageIcon,
   CalendarDays, FileText, MapPinned, CloudOff, RefreshCw,
 } from 'lucide-react';
 import { LocationMapPicker } from '@/components/LocationMapPicker';
@@ -19,6 +19,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { toast } from '@/hooks/use-toast';
 import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { cn } from '@/lib/utils';
+import { Modal } from '@/components/Modal';
 
 type GeoStatus = 'idle' | 'locating' | 'success' | 'error';
 
@@ -108,18 +109,7 @@ function NovaPendenciaModal({
   const podeConfirmar = !!foto && !!coords && !busy;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-900">
-          <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Registrar pendência</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Fechar">
-            <X className="icon-md" />
-          </button>
-        </div>
+    <Modal title="Registrar pendência" onClose={onClose} size="sm">
         <div className="p-5 space-y-4">
           {!foto ? (
             <div className="grid grid-cols-2 gap-3">
@@ -276,8 +266,7 @@ function NovaPendenciaModal({
             {busy ? <Loader2 size={16} className="animate-spin" /> : 'Salvar pendência'}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

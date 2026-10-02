@@ -14,6 +14,12 @@ interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
+/**
+ * Diálogo de confirmação. Clicar fora não fecha — a saída é sempre pelo botão
+ * de cancelar, igual aos modais de formulário (ver Modal.tsx). A regra única
+ * vale mais que a conveniência: quem aprende que "fora não fecha" num lugar
+ * não perde formulário no outro por tentar.
+ */
 export function ConfirmDialog({
   isOpen,
   title,
@@ -57,10 +63,7 @@ export function ConfirmDialog({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center p-4"
-      onClick={onCancel}
-    >
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
 

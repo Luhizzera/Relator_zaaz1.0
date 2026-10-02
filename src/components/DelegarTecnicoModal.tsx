@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, User, Loader2, Search } from 'lucide-react';
+import { User, Loader2, Search } from 'lucide-react';
 import { supabase, ProfileRow } from '@/lib/supabaseClient';
 import { listEquipesDoSupervisor } from '@/lib/manutencaoService';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
+import { Modal } from '@/components/Modal';
 
 interface DelegarTecnicoModalProps {
   isOpen: boolean;
@@ -88,21 +89,7 @@ export function DelegarTecnicoModal({ isOpen, titulo, permitirReferenciaExterna,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Delegar OS</h2>
-            <p className="text-xs text-slate-400">{titulo}</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Fechar">
-            <X size={20} />
-          </button>
-        </div>
+    <Modal title="Delegar OS" subtitle={titulo} onClose={onClose} size="sm" sheet={false}>
 
         {!loading && !semEquipe && tecnicos.length > 0 && (
           <div className="px-5 pt-4 pb-1">
@@ -198,7 +185,6 @@ export function DelegarTecnicoModal({ isOpen, titulo, permitirReferenciaExterna,
             Confirmar delegação
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

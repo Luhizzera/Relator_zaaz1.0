@@ -23,6 +23,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { cn } from '@/lib/utils';
+import { Modal } from '@/components/Modal';
 
 // Próxima ação recomendada por status — navegação linear (uma ação grande por vez).
 const PROXIMA_ACAO: Partial<Record<StatusOS, { label: string; icon: any; proximo: StatusOS; acao: string }>> = {
@@ -758,23 +759,12 @@ export default function ManutencaoExecucaoMobile() {
   );
 }
 
+/** Atalho local: todos os modais desta tela têm o mesmo corpo com `p-5 space-y-4`. */
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-900">
-          <h2 className="text-base font-black text-slate-800 dark:text-slate-100">{title}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Fechar">
-            <X className="icon-md" />
-          </button>
-        </div>
-        <div className="p-5 space-y-4">{children}</div>
-      </div>
-    </div>
+    <Modal title={title} onClose={onClose} size="sm">
+      <div className="p-5 space-y-4">{children}</div>
+    </Modal>
   );
 }
 

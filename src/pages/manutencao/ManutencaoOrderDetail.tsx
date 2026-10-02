@@ -696,8 +696,9 @@ function AbaAprovacao({ ordem, onChanged }: { ordem: ManutencaoOrdem; onChanged:
         </div>
       )}
 
+      {/* Clicar fora não fecha: tem um motivo digitado aqui dentro. Saída pelo "Voltar". */}
       {acao && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4" onClick={() => !processando && setAcao(null)}>
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
           <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-black text-slate-800 dark:text-slate-100">

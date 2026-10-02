@@ -19,6 +19,7 @@ import {
 } from '@/lib/certificacaoService';
 import { listEquipes, listEquipesDoSupervisor } from '@/lib/manutencaoService';
 import { EquipeRow, ProfileRow } from '@/lib/supabaseClient';
+import { Modal } from '@/components/Modal';
 
 const STATUS_COLOR: Record<StatusOrdemCertificacao, string> = {
   aberta: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
@@ -126,16 +127,12 @@ function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; on
   const pontoDoMapa = pontos.find((p) => p.chave === mapaDoPonto);
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
+    <>
+      <Modal
+        title="Nova certificação"
+        subtitle="Obra nova: cada CTO entra com o sinal esperado de projeto."
+        onClose={onClose}
       >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800">
-          <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Nova certificação</h2>
-          <p className="text-xs text-slate-400">Obra nova: cada CTO entra com o sinal esperado de projeto.</p>
-        </div>
 
         <div className="p-5 space-y-4">
           <div>
@@ -308,11 +305,11 @@ function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; on
             </button>
           </div>
         </div>
-      </div>
+      </Modal>
 
       {mapaDoPonto && (
-        <div className="fixed inset-0 z-[1001] flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
-          <div className="absolute inset-0 bg-black/60" onClick={() => setMapaDoPonto(null)} />
+        <div className="fixed inset-0 z-[1001] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" />
           <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-4">
             <p className="text-sm font-black text-slate-800 dark:text-slate-100 mb-3">
               Onde fica {pontoDoMapa?.nomeCto.trim() || 'a CTO'}
@@ -329,7 +326,7 @@ function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; on
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -371,21 +368,13 @@ function DelegarTecnicoCertificacaoModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <div className="min-w-0">
-            <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Delegar certificação</h2>
-            <p className="text-xs text-slate-400 truncate">{ordem.numero} — {ordem.titulo}</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 shrink-0" aria-label="Fechar">
-            <X size={20} />
-          </button>
-        </div>
+    <Modal
+      title="Delegar certificação"
+      subtitle={`${ordem.numero} — ${ordem.titulo}`}
+      onClose={onClose}
+      size="sm"
+      sheet={false}
+    >
 
         <div className="p-5 space-y-2 max-h-72 overflow-y-auto">
           {loading ? (
@@ -431,8 +420,7 @@ function DelegarTecnicoCertificacaoModal({
             {confirmando && <Loader2 size={14} className="animate-spin" />} Confirmar delegação
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

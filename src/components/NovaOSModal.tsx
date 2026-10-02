@@ -1,5 +1,6 @@
 import React from 'react';
-import { FileText, Wrench, X } from 'lucide-react';
+import { FileText, Wrench } from 'lucide-react';
+import { Modal } from '@/components/Modal';
 
 interface NovaOSModalProps {
   isOpen: boolean;
@@ -17,28 +18,7 @@ export function NovaOSModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <h2 className="text-base font-black text-slate-800 dark:text-slate-100">
-            O que você quer criar?
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-            aria-label="Fechar"
-          >
-            <X className="icon-md" />
-          </button>
-        </div>
+    <Modal title="O que você quer criar?" onClose={onClose} sheet={false}>
 
         <div className="p-5 space-y-3">
           <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
@@ -79,7 +59,6 @@ export function NovaOSModal({
             </div>
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -22,6 +22,7 @@ import { pendenciaParaPonto } from '@/lib/vistoriaExport';
 import type { PendenciaBacklog } from '@/types/vistoria';
 import { listEquipes, listEquipesDoSupervisor } from '@/lib/manutencaoService';
 import { EquipeRow, ProfileRow } from '@/lib/supabaseClient';
+import { Modal } from '@/components/Modal';
 
 const STATUS_COLOR: Record<StatusOrdemVistoria, string> = {
   aberta: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
@@ -136,15 +137,8 @@ function NovaRotaModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800">
-          <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Nova rota de vistoria</h2>
-        </div>
+    <>
+      <Modal title="Nova rota de vistoria" onClose={onClose}>
         <div className="p-5 space-y-4">
           <div>
             <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">Título da rota</label>
@@ -224,11 +218,11 @@ function NovaRotaModal({ onClose, onCreated }: { onClose: () => void; onCreated:
             </button>
           </div>
         </div>
-      </div>
+      </Modal>
 
       {mapaAberto && (
-        <div className="fixed inset-0 z-[1001] flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
-          <div className="absolute inset-0 bg-black/60" onClick={() => setMapaAberto(null)} />
+        <div className="fixed inset-0 z-[1001] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" />
           <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-4">
             {/* O mapa repete a mesma marca do campo (letra + cor + verbo) pra
                 não haver dúvida sobre qual dos dois se está marcando. */}
@@ -255,7 +249,7 @@ function NovaRotaModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -304,21 +298,13 @@ function DelegarTecnicoVistoriaModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Delegar rota</h2>
-            <p className="text-xs text-slate-400">{ordem.numero} — {ordem.titulo}</p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" aria-label="Fechar">
-            <X size={20} />
-          </button>
-        </div>
+    <Modal
+      title="Delegar rota"
+      subtitle={`${ordem.numero} — ${ordem.titulo}`}
+      onClose={onClose}
+      size="sm"
+      sheet={false}
+    >
 
         <div className="p-5 space-y-2 max-h-72 overflow-y-auto">
           {loading ? (
@@ -365,8 +351,7 @@ function DelegarTecnicoVistoriaModal({
             Confirmar delegação
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

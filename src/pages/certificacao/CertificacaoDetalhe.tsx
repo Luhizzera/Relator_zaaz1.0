@@ -19,6 +19,7 @@ import {
   getOrdemCertificacao, iniciarCertificacao, registrarMedicao, finalizarCertificacao,
   aprovarCertificacao, devolverCertificacao, cancelarCertificacao,
 } from '@/lib/certificacaoService';
+import { Modal } from '@/components/Modal';
 
 const RESULTADO_COR: Record<ResultadoPonto, string> = {
   pendente: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
@@ -99,23 +100,12 @@ function MedirPontoModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm max-h-[88vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-900">
-          <div className="min-w-0">
-            <h2 className="text-base font-black text-slate-800 dark:text-slate-100 truncate">{ponto.nomeCto}</h2>
-            <p className="text-xs text-slate-400">
-              Esperado {formatarDbm(ponto.sinalEsperadoDbm)} · aceita até {formatarDbm(limite)}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 shrink-0" aria-label="Fechar">
-            <X size={20} />
-          </button>
-        </div>
+    <Modal
+      title={ponto.nomeCto}
+      subtitle={`Esperado ${formatarDbm(ponto.sinalEsperadoDbm)} · aceita até ${formatarDbm(limite)}`}
+      onClose={onClose}
+      size="sm"
+    >
 
         <div className="p-5 space-y-4">
           {ponto.refazer && (
@@ -224,8 +214,7 @@ function MedirPontoModal({
             </p>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -267,16 +256,12 @@ function DevolverModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        className="relative bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-5 border-b border-slate-100 dark:border-slate-800">
-          <h2 className="text-base font-black text-slate-800 dark:text-slate-100">Devolver para refazer</h2>
-          <p className="text-xs text-slate-400">Marque as CTOs que precisam ser medidas de novo.</p>
-        </div>
+    <Modal
+      title="Devolver para refazer"
+      subtitle="Marque as CTOs que precisam ser medidas de novo."
+      onClose={onClose}
+      size="sm"
+    >
 
         <div className="p-5 space-y-3">
           <div className="space-y-1.5">
@@ -328,8 +313,7 @@ function DevolverModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
