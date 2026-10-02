@@ -13,6 +13,7 @@ import {
 import { createManutencaoOrder, addFotoManutencao } from '@/lib/manutencaoService';
 import { reverseGeocode } from '@/lib/geocoding';
 import { ufPorCoordenada } from '@/lib/ufPorCoordenada';
+import { buscarPorIds, buscarTudo } from '@/lib/consultaEmLotes';
 import type { ManutencaoOrdem, PrioridadeOS } from '@/types/manutencao';
 
 /**
@@ -82,22 +83,21 @@ function rowToOrdemVistoria(row: OrdemVistoriaRowJoined, pendencias: PendenciaVi
 }
 
 export async function listOrdensVistoria(): Promise<OrdemVistoria[]> {
-  const { data, error } = await supabase
-    .from('ordens_vistoria')
-    .select(ORDEM_VISTORIA_SELECT)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  const rows = (data ?? []) as OrdemVistoriaRowJoined[];
+  const rows = await buscarTudo<OrdemVistoriaRowJoined>(
+    'ordens_vistoria',
+    ORDEM_VISTORIA_SELECT,
+    { coluna: 'created_at', ascendente: false },
+  );
   if (rows.length === 0) return [];
 
-  const { data: pendData, error: pendError } = await supabase
-    .from('pendencias_vistoria')
-    .select('*')
-    .in('ordem_vistoria_id', rows.map((r) => r.id))
-    .order('created_at', { ascending: true });
-  if (pendError) throw pendError;
+  const pendData = await buscarPorIds<PendenciaVistoriaRow>(
+    'pendencias_vistoria',
+    'ordem_vistoria_id',
+    rows.map((r) => r.id),
+    { coluna: 'created_at' },
+  );
   const pendPorOrdem = new Map<string, PendenciaVistoriaRow[]>();
-  (pendData ?? []).forEach((p) => {
+  pendData.forEach((p) => {
     const lista = pendPorOrdem.get(p.ordem_vistoria_id) ?? [];
     lista.push(p as PendenciaVistoriaRow);
     pendPorOrdem.set(p.ordem_vistoria_id, lista);
@@ -223,35 +223,35 @@ export async function removePendencia(pendencia: PendenciaVistoria): Promise<voi
  * (ex: gestor escolhendo uma equipe específica dentre as que ele já vê).
  */
 export async function listPendenciasBacklog(filtro?: { equipeId?: string }): Promise<PendenciaBacklog[]> {
-  let query = supabase
-    .from('ordens_vistoria')
-    .select('id, numero, titulo, equipe_id')
-    .neq('status', 'cancelada');
-  if (filtro?.equipeId) query = query.eq('equipe_id', filtro.equipeId);
-  const { data: ordensData, error: ordensError } = await query;
-  if (ordensError) throw ordensError;
+  const ordensData = await buscarTudo<{ id: string; numero: string; titulo: string; equipe_id: string | null }>(
+    'ordens_vistoria',
+    'id, numero, titulo, equipe_id',
+    undefined,
+    (q) => {
+      const semCanceladas = q.neq('status', 'cancelada');
+      return filtro?.equipeId ? semCanceladas.eq('equipe_id', filtro.equipeId) : semCanceladas;
+    },
+  );
 
-  const ordensPorId = new Map((ordensData ?? []).map((o) => [o.id, o]));
+  const ordensPorId = new Map(ordensData.map((o) => [o.id, o]));
   if (ordensPorId.size === 0) return [];
 
-  const { data: pendData, error: pendError } = await supabase
-    .from('pendencias_vistoria')
-    .select('*')
-    .in('ordem_vistoria_id', Array.from(ordensPorId.keys()))
-    .order('created_at', { ascending: false });
-  if (pendError) throw pendError;
-
-  const pendencias = (pendData ?? []) as PendenciaVistoriaRow[];
+  const pendencias = await buscarPorIds<PendenciaVistoriaRow>(
+    'pendencias_vistoria',
+    'ordem_vistoria_id',
+    Array.from(ordensPorId.keys()),
+    { coluna: 'created_at', ascendente: false },
+  );
   const corretivaIds = pendencias.map((p) => p.ordem_corretiva_id).filter((id): id is string => !!id);
 
   const corretivasPorId = new Map<string, { numero: string; status: string }>();
   if (corretivaIds.length > 0) {
-    const { data: corretivasData, error: corretivasError } = await supabase
-      .from('ordens_manutencao')
-      .select('id, numero, status')
-      .in('id', corretivaIds);
-    if (corretivasError) throw corretivasError;
-    (corretivasData ?? []).forEach((o) => corretivasPorId.set(o.id, { numero: o.numero, status: o.status }));
+    const corretivasData = await buscarPorIds<{ id: string; numero: string; status: string }>(
+      'ordens_manutencao',
+      'id',
+      corretivaIds,
+    );
+    corretivasData.forEach((o) => corretivasPorId.set(o.id, { numero: o.numero, status: o.status }));
   }
 
   return pendencias.map((row) => {

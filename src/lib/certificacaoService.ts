@@ -5,6 +5,7 @@ import {
   deleteFotoCertificacaoFromStorage,
 } from '@/lib/supabaseClient';
 import type { OrdemCertificacaoRow, PontoCertificacaoRow } from '@/lib/supabaseClient';
+import { buscarPorIds, buscarTudo, escreverPorIds } from '@/lib/consultaEmLotes';
 import {
   OrdemCertificacao, PontoCertificacao, StatusOrdemCertificacao, MARGEM_DB_PADRAO, resumoCertificacao,
 } from '@/types/certificacao';
@@ -91,23 +92,22 @@ function rowToOrdem(row: OrdemCertificacaoRowJoined, pontos: PontoCertificacaoRo
 }
 
 export async function listOrdensCertificacao(): Promise<OrdemCertificacao[]> {
-  const { data, error } = await supabase
-    .from('ordens_certificacao')
-    .select(ORDEM_CERTIFICACAO_SELECT)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  const rows = (data ?? []) as OrdemCertificacaoRowJoined[];
+  const rows = await buscarTudo<OrdemCertificacaoRowJoined>(
+    'ordens_certificacao',
+    ORDEM_CERTIFICACAO_SELECT,
+    { coluna: 'created_at', ascendente: false },
+  );
   if (rows.length === 0) return [];
 
-  const { data: pontosData, error: pontosError } = await supabase
-    .from('pontos_certificacao')
-    .select('*')
-    .in('ordem_certificacao_id', rows.map((r) => r.id))
-    .order('ordem_index', { ascending: true });
-  if (pontosError) throw pontosError;
+  const pontosData = await buscarPorIds<PontoCertificacaoRow>(
+    'pontos_certificacao',
+    'ordem_certificacao_id',
+    rows.map((r) => r.id),
+    { coluna: 'ordem_index' },
+  );
 
   const porOrdem = new Map<string, PontoCertificacaoRow[]>();
-  (pontosData ?? []).forEach((p) => {
+  pontosData.forEach((p) => {
     const lista = porOrdem.get(p.ordem_certificacao_id) ?? [];
     lista.push(p as PontoCertificacaoRow);
     porOrdem.set(p.ordem_certificacao_id, lista);
@@ -286,11 +286,12 @@ export async function devolverCertificacao(
 ): Promise<void> {
   if (pontosParaRefazer.length === 0) throw new Error('Marque ao menos um ponto para refazer.');
 
-  const { error } = await supabase
-    .from('pontos_certificacao')
-    .update({ refazer: true, motivo_refazer: motivo || null })
-    .in('id', pontosParaRefazer);
-  if (error) throw error;
+  await escreverPorIds(pontosParaRefazer, (lote) =>
+    supabase
+      .from('pontos_certificacao')
+      .update({ refazer: true, motivo_refazer: motivo || null })
+      .in('id', lote),
+  );
 
   await updateStatus(ordemId, 'reaberta', { motivo_devolucao: motivo || null });
 }

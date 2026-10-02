@@ -21,6 +21,7 @@ import type {
 } from '@/lib/supabaseClient';
 import { ManutencaoOrdem, StatusOS, ChecklistItemOS, SOLUCAO_PROBLEMA_CTO } from '@/types/manutencao';
 import { normalizarNomeCidade, normalizarUf } from '@/lib/geocoding';
+import { buscarPorIds, buscarTudo } from '@/lib/consultaEmLotes';
 
 type ProfileRowLite = Pick<ProfileRow, 'id' | 'nome' | 'email' | 'ativo' | 'equipe_id'>;
 
@@ -197,27 +198,24 @@ async function attachChildren(rows: OrdemManutencaoRowJoined[]): Promise<Manuten
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
 
-  const [ocorrenciasRes, materiaisRes, checklistRes, historicoRes, fotosRes, videosRes] = await Promise.all([
-    supabase.from('ocorrencias_manutencao').select('*').in('ordem_id', ids),
-    supabase.from('materiais_manutencao').select('*').in('ordem_id', ids),
-    supabase.from('checklist_itens_manutencao').select('*').in('ordem_id', ids).order('ordem_index', { ascending: true }),
-    supabase.from('historico_manutencao').select('*').in('ordem_id', ids).order('created_at', { ascending: true }),
-    supabase.from('fotos_manutencao').select('*').in('ordem_id', ids).order('created_at', { ascending: true }),
-    supabase.from('videos_manutencao').select('*').in('ordem_id', ids).order('created_at', { ascending: true }),
+  // Em lotes de ids e paginado (ver consultaEmLotes.ts): com as 631 OS de
+  // hoje, uma lista unica de ids estourava o tamanho da URL, e o checklist e o
+  // historico vinham cortados em 1000 linhas.
+  const [ocorrencias, materiais, checklist, historico, fotos, videos] = await Promise.all([
+    buscarPorIds<OcorrenciaManutencaoRow>('ocorrencias_manutencao', 'ordem_id', ids),
+    buscarPorIds<MaterialManutencaoRow>('materiais_manutencao', 'ordem_id', ids),
+    buscarPorIds<ChecklistItemManutencaoRow>('checklist_itens_manutencao', 'ordem_id', ids, { coluna: 'ordem_index' }),
+    buscarPorIds<HistoricoManutencaoRow>('historico_manutencao', 'ordem_id', ids, { coluna: 'created_at' }),
+    buscarPorIds<FotoManutencaoRow>('fotos_manutencao', 'ordem_id', ids, { coluna: 'created_at' }),
+    buscarPorIds<VideoManutencaoRow>('videos_manutencao', 'ordem_id', ids, { coluna: 'created_at' }),
   ]);
-  if (ocorrenciasRes.error) throw ocorrenciasRes.error;
-  if (materiaisRes.error) throw materiaisRes.error;
-  if (checklistRes.error) throw checklistRes.error;
-  if (historicoRes.error) throw historicoRes.error;
-  if (fotosRes.error) throw fotosRes.error;
-  if (videosRes.error) throw videosRes.error;
 
-  const ocorrenciasMap = groupByOrdemId(ocorrenciasRes.data as OcorrenciaManutencaoRow[] | null);
-  const materiaisMap = groupByOrdemId(materiaisRes.data as MaterialManutencaoRow[] | null);
-  const checklistMap = groupByOrdemId(checklistRes.data as ChecklistItemManutencaoRow[] | null);
-  const historicoMap = groupByOrdemId(historicoRes.data as HistoricoManutencaoRow[] | null);
-  const fotosMap = groupByOrdemId(fotosRes.data as FotoManutencaoRow[] | null);
-  const videosMap = groupByOrdemId(videosRes.data as VideoManutencaoRow[] | null);
+  const ocorrenciasMap = groupByOrdemId(ocorrencias);
+  const materiaisMap = groupByOrdemId(materiais);
+  const checklistMap = groupByOrdemId(checklist);
+  const historicoMap = groupByOrdemId(historico);
+  const fotosMap = groupByOrdemId(fotos);
+  const videosMap = groupByOrdemId(videos);
 
   return rows.map((row) =>
     rowToOrdem(
@@ -306,12 +304,12 @@ async function sincronizarOcorrenciasEChecklist(
 }
 
 export async function listManutencaoOrders(): Promise<ManutencaoOrdem[]> {
-  const { data, error } = await supabase
-    .from('ordens_manutencao')
-    .select(ORDEM_SELECT)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return attachChildren((data ?? []) as OrdemManutencaoRowJoined[]);
+  const rows = await buscarTudo<OrdemManutencaoRowJoined>(
+    'ordens_manutencao',
+    ORDEM_SELECT,
+    { coluna: 'created_at', ascendente: false },
+  );
+  return attachChildren(rows);
 }
 
 export async function getManutencaoOrder(id: string): Promise<ManutencaoOrdem | null> {
