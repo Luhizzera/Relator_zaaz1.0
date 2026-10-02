@@ -165,3 +165,14 @@ export function parseDbm(texto: string): number | null {
 /** Uma casa decimal e vírgula — como o técnico lê no powermeter e como sai no PDF. */
 export const formatarDbm = (valor: number | null | undefined) =>
   valor == null ? '—' : `${valor.toFixed(2).replace('.', ',')} dBm`;
+
+/**
+ * Quanto o medido ficou acima (+) ou abaixo (−) do projeto, em dB.
+ *
+ * O sinal vai explícito porque é a leitura que decide a conferência, e um
+ * "1,20" solto não diz se a CTO ficou melhor ou pior que o esperado.
+ */
+export const formatarDiferencaDb = (medidoDbm: number, esperadoDbm: number) => {
+  const diferenca = medidoDbm - esperadoDbm;
+  return `${diferenca > 0 ? '+' : ''}${diferenca.toFixed(2).replace('.', ',')} dB`;
+};

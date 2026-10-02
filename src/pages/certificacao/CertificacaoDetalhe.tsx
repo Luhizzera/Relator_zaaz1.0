@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Loader2, MapPin, Camera, Image as ImageIcon, X, Check, AlertTriangle, RotateCcw, SignalHigh,
+  Maximize2, CalendarClock,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -13,7 +14,8 @@ import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { getSignedFotoCertificacaoUrl } from '@/lib/supabaseClient';
 import {
   OrdemCertificacao, PontoCertificacao, STATUS_CERTIFICACAO_LABEL, RESULTADO_LABEL,
-  resultadoDoPonto, resumoCertificacao, limiteAceitavelDbm, formatarDbm, parseDbm, ResultadoPonto,
+  resultadoDoPonto, resumoCertificacao, limiteAceitavelDbm, formatarDbm, formatarDiferencaDb,
+  parseDbm, ResultadoPonto,
 } from '@/types/certificacao';
 import {
   getOrdemCertificacao, iniciarCertificacao, registrarMedicao, finalizarCertificacao,
@@ -38,6 +40,43 @@ function FotoDoPonto({ storagePath, className }: { storagePath: string; classNam
 
   if (!url) return <div className={cn('rounded-xl bg-slate-100 dark:bg-slate-800', className)} />;
   return <img src={url} alt="CTO com o powermeter" className={cn('rounded-xl object-cover', className)} />;
+}
+
+/**
+ * Foto em tela cheia. Existe porque conferir é LER o número no visor do
+ * powermeter na foto: na miniatura, e mesmo no tamanho do modal, o display não
+ * é legível.
+ *
+ * Fecha no clique fora, ao contrário dos modais de formulário (ver Modal.tsx) —
+ * aqui não há nada digitado a perder, e é o gesto que se espera num
+ * visualizador de imagem.
+ */
+function FotoAmpliada({ storagePath, nomeCto, onClose }: { storagePath: string; nomeCto: string; onClose: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let ativo = true;
+    getSignedFotoCertificacaoUrl(storagePath).then((u) => { if (ativo) setUrl(u); });
+    return () => { ativo = false; };
+  }, [storagePath]);
+
+  return (
+    <div className="fixed inset-0 z-[1100] bg-black/90 flex items-center justify-center p-4" onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white" aria-label="Fechar">
+        <X className="icon-lg" />
+      </button>
+      <p className="absolute top-5 left-5 right-16 text-sm font-bold text-white/90 truncate">{nomeCto}</p>
+      {url
+        ? (
+          <img
+            src={url}
+            alt={`CTO ${nomeCto} junto do powermeter`}
+            className="max-w-full max-h-[85vh] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        )
+        : <Loader2 className="animate-spin text-white/70" size={24} />}
+    </div>
+  );
 }
 
 function MedirPontoModal({
@@ -106,115 +145,229 @@ function MedirPontoModal({
       onClose={onClose}
       size="sm"
     >
+      <div className="p-5 space-y-4">
+        {ponto.refazer && (
+          <div className="flex items-start gap-2 text-xs font-semibold text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-3">
+            <RotateCcw size={14} className="shrink-0 mt-0.5" />
+            <span>
+              O gestor pediu para refazer esta medição.
+              {ponto.motivoRefazer ? ` Motivo: ${ponto.motivoRefazer}` : ''}
+            </span>
+          </div>
+        )}
 
-        <div className="p-5 space-y-4">
-          {ponto.refazer && (
-            <div className="flex items-start gap-2 text-xs font-semibold text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-3">
-              <RotateCcw size={14} className="shrink-0 mt-0.5" />
-              <span>
-                O gestor pediu para refazer esta medição.
-                {ponto.motivoRefazer ? ` Motivo: ${ponto.motivoRefazer}` : ''}
-              </span>
-            </div>
+        <div>
+          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
+            Sinal medido <span className="text-red-500">*</span>
+          </label>
+          <input
+            value={sinal}
+            onChange={(e) => setSinal(e.target.value)}
+            inputMode="text"
+            placeholder="-18,40"
+            className="w-full px-3 py-2.5 text-lg font-black rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+          />
+          {sinalPositivoSuspeito && (
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400 mt-1.5">
+              <AlertTriangle size={12} /> Sinal positivo é incomum — confira se faltou o sinal de menos.
+            </p>
           )}
-
-          <div>
-            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
-              Sinal medido <span className="text-red-500">*</span>
-            </label>
-            <input
-              value={sinal}
-              onChange={(e) => setSinal(e.target.value)}
-              inputMode="text"
-              placeholder="-18,40"
-              className="w-full px-3 py-2.5 text-lg font-black rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-            />
-            {sinalPositivoSuspeito && (
-              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400 mt-1.5">
-                <AlertTriangle size={12} /> Sinal positivo é incomum — confira se faltou o sinal de menos.
-              </p>
-            )}
-            {medido != null && (
-              <p className={cn(
-                'inline-flex items-center gap-1.5 text-[11px] font-black px-2 py-1 rounded-full mt-2',
-                RESULTADO_COR[resultadoPrevisto],
-              )}>
-                {RESULTADO_LABEL[resultadoPrevisto]} · diferença de {(medido - ponto.sinalEsperadoDbm).toFixed(2).replace('.', ',')} dB
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
-              Foto da CTO com o powermeter <span className="text-red-500">*</span>
-            </label>
-            {foto ? (
-              <div className="relative">
-                <img src={foto} alt="Medição" className="w-full rounded-xl" />
-                <button
-                  onClick={() => setFoto(null)}
-                  className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/60 text-white flex items-center justify-center"
-                  aria-label="Remover foto"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            ) : ponto.storagePath ? (
-              <div className="space-y-1.5">
-                <FotoDoPonto storagePath={ponto.storagePath} className="w-full h-40" />
-                <p className="text-[11px] text-slate-400">Foto da medição anterior. Tire outra se a leitura mudou.</p>
-              </div>
-            ) : null}
-
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              <button
-                type="button"
-                onClick={() => cameraRef.current?.click()}
-                disabled={processandoFoto}
-                className="flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-600 text-sm font-bold text-slate-700 dark:text-slate-300 disabled:opacity-60"
-              >
-                {processandoFoto ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />} Câmera
-              </button>
-              <button
-                type="button"
-                onClick={() => galeriaRef.current?.click()}
-                disabled={processandoFoto}
-                className="flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-600 text-sm font-bold text-slate-700 dark:text-slate-300 disabled:opacity-60"
-              >
-                {processandoFoto ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />} Galeria
-              </button>
-            </div>
-            <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFoto(e.target.files?.[0])} />
-            <input ref={galeriaRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFoto(e.target.files?.[0])} />
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
-              Observação <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional)</span>
-            </label>
-            <textarea
-              value={observacao}
-              onChange={(e) => setObservacao(e.target.value)}
-              rows={3}
-              placeholder="Algo que explique a leitura, se necessário..."
-              className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 resize-none"
-            />
-          </div>
-
-          <button
-            onClick={handleSalvar}
-            disabled={!podeSalvar}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-bold transition-colors"
-          >
-            {salvando ? <Loader2 size={16} className="animate-spin" /> : 'Salvar medição'}
-          </button>
-          {!temFoto && (
-            <p className="text-[11px] text-slate-400 text-center -mt-2">
-              A foto é obrigatória: é ela que sustenta a medição no certificado.
+          {medido != null && (
+            <p className={cn(
+              'inline-flex items-center gap-1.5 text-[11px] font-black px-2 py-1 rounded-full mt-2',
+              RESULTADO_COR[resultadoPrevisto],
+            )}>
+              {RESULTADO_LABEL[resultadoPrevisto]} · diferença de {(medido - ponto.sinalEsperadoDbm).toFixed(2).replace('.', ',')} dB
             </p>
           )}
         </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
+            Foto da CTO com o powermeter <span className="text-red-500">*</span>
+          </label>
+          {foto ? (
+            <div className="relative">
+              <img src={foto} alt="Medição" className="w-full rounded-xl" />
+              <button
+                onClick={() => setFoto(null)}
+                className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/60 text-white flex items-center justify-center"
+                aria-label="Remover foto"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ) : ponto.storagePath ? (
+            <div className="space-y-1.5">
+              <FotoDoPonto storagePath={ponto.storagePath} className="w-full h-40" />
+              <p className="text-[11px] text-slate-400">Foto da medição anterior. Tire outra se a leitura mudou.</p>
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <button
+              type="button"
+              onClick={() => cameraRef.current?.click()}
+              disabled={processandoFoto}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-600 text-sm font-bold text-slate-700 dark:text-slate-300 disabled:opacity-60"
+            >
+              {processandoFoto ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />} Câmera
+            </button>
+            <button
+              type="button"
+              onClick={() => galeriaRef.current?.click()}
+              disabled={processandoFoto}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-600 text-sm font-bold text-slate-700 dark:text-slate-300 disabled:opacity-60"
+            >
+              {processandoFoto ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />} Galeria
+            </button>
+          </div>
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFoto(e.target.files?.[0])} />
+          <input ref={galeriaRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFoto(e.target.files?.[0])} />
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5 block">
+            Observação <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional)</span>
+          </label>
+          <textarea
+            value={observacao}
+            onChange={(e) => setObservacao(e.target.value)}
+            rows={3}
+            placeholder="Algo que explique a leitura, se necessário..."
+            className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 resize-none"
+          />
+        </div>
+
+        <button
+          onClick={handleSalvar}
+          disabled={!podeSalvar}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-bold transition-colors"
+        >
+          {salvando ? <Loader2 size={16} className="animate-spin" /> : 'Salvar medição'}
+        </button>
+        {!temFoto && (
+          <p className="text-[11px] text-slate-400 text-center -mt-2">
+            A foto é obrigatória: é ela que sustenta a medição no certificado.
+          </p>
+        )}
+      </div>
     </Modal>
+  );
+}
+
+/**
+ * Um ponto já medido, só de leitura. É por aqui que a conferência acontece: a
+ * foto grande, os três números que decidem o resultado e o que o técnico
+ * escreveu — sem risco de alterar a medição de quem só está olhando.
+ */
+function DetalhePontoModal({
+  ponto, ordem, onClose,
+}: {
+  ponto: PontoCertificacao;
+  ordem: OrdemCertificacao;
+  onClose: () => void;
+}) {
+  const [ampliada, setAmpliada] = useState(false);
+  const resultado = resultadoDoPonto(ponto, ordem.margemDb);
+  const limite = limiteAceitavelDbm(ponto.sinalEsperadoDbm, ordem.margemDb);
+
+  return (
+    <>
+      <Modal
+        title={ponto.nomeCto}
+        subtitle={`Esperado ${formatarDbm(ponto.sinalEsperadoDbm)} · aceita até ${formatarDbm(limite)}`}
+        onClose={onClose}
+        size="sm"
+      >
+        <div className="p-5 space-y-4">
+          {ponto.storagePath ? (
+            <button type="button" onClick={() => setAmpliada(true)} className="relative block w-full" title="Ampliar a foto">
+              <FotoDoPonto storagePath={ponto.storagePath} className="w-full h-56" />
+              <span className="absolute bottom-2 right-2 flex items-center gap-1 text-[11px] font-bold text-white bg-black/60 rounded-lg px-2 py-1">
+                <Maximize2 size={12} /> Ampliar
+              </span>
+            </button>
+          ) : (
+            <div className="w-full h-24 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center text-xs text-slate-400">
+              Sem foto registrada
+            </div>
+          )}
+
+          <div className={cn('flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-black', RESULTADO_COR[resultado])}>
+            {resultado === 'aprovado' && <Check size={16} />}
+            {resultado === 'reprovado' && <AlertTriangle size={16} />}
+            {RESULTADO_LABEL[resultado]}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 py-2">
+              <p className="text-sm font-black text-slate-700 dark:text-slate-200">{formatarDbm(ponto.sinalEsperadoDbm)}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase">Esperado</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 py-2">
+              <p className={cn(
+                'text-sm font-black',
+                ponto.sinalMedidoDbm == null ? 'text-slate-400'
+                  : resultado === 'reprovado' ? 'text-red-600 dark:text-red-400'
+                    : 'text-green-600 dark:text-green-400',
+              )}
+              >
+                {formatarDbm(ponto.sinalMedidoDbm)}
+              </p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase">Medido</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 py-2">
+              <p className="text-sm font-black text-slate-700 dark:text-slate-200">
+                {ponto.sinalMedidoDbm == null ? '—' : formatarDiferencaDb(ponto.sinalMedidoDbm, ponto.sinalEsperadoDbm)}
+              </p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase">Diferença</p>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-400 text-center -mt-1">
+            Margem de {ordem.margemDb} dB: passa até {formatarDbm(limite)}.
+          </p>
+
+          {ponto.observacao && (
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3">
+              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Observação do técnico</p>
+              <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{ponto.observacao}</p>
+            </div>
+          )}
+
+          {ponto.refazer && (
+            <div className="flex items-start gap-2 text-xs font-semibold text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-3">
+              <RotateCcw size={14} className="shrink-0 mt-0.5" />
+              <span>Marcada para refazer{ponto.motivoRefazer ? `: ${ponto.motivoRefazer}` : ''}</span>
+            </div>
+          )}
+
+          <div className="space-y-1.5 text-[11px] text-slate-400">
+            {ponto.medidoEm && (
+              <p className="flex items-center gap-1.5">
+                <CalendarClock size={12} className="shrink-0" />
+                Medido em {new Date(ponto.medidoEm).toLocaleString('pt-BR')}
+                {ponto.medidoPor && ponto.medidoPor === ordem.tecnicoId && ordem.tecnico ? ` por ${ordem.tecnico}` : ''}
+              </p>
+            )}
+            <a
+              href={`https://www.google.com/maps?q=${ponto.latitude},${ponto.longitude}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 hover:text-amber-600 dark:hover:text-amber-400"
+            >
+              <MapPin size={12} className="shrink-0" />
+              {ponto.latitude.toFixed(5)}, {ponto.longitude.toFixed(5)} — ver no mapa
+            </a>
+          </div>
+        </div>
+      </Modal>
+
+      {ampliada && ponto.storagePath && (
+        <FotoAmpliada storagePath={ponto.storagePath} nomeCto={ponto.nomeCto} onClose={() => setAmpliada(false)} />
+      )}
+    </>
   );
 }
 
@@ -324,6 +477,7 @@ export default function CertificacaoDetalhe() {
   const [ordem, setOrdem] = useState<OrdemCertificacao | null>(null);
   const [loading, setLoading] = useState(true);
   const [pontoEmMedicao, setPontoEmMedicao] = useState<PontoCertificacao | null>(null);
+  const [pontoEmDetalhe, setPontoEmDetalhe] = useState<PontoCertificacao | null>(null);
   const [showDevolver, setShowDevolver] = useState(false);
   const [confirmarCancelar, setConfirmarCancelar] = useState(false);
   const [agindo, setAgindo] = useState(false);
@@ -440,18 +594,18 @@ export default function CertificacaoDetalhe() {
       <div className="space-y-2">
         {ordem.pontos.map((ponto) => {
           const resultado = resultadoDoPonto(ponto, ordem.margemDb);
-          const clicavel = podeMedir;
-          const Tag = clicavel ? 'button' : 'div';
           return (
-            <Tag
+            // Quem está medindo abre a medição; todo o resto abre o detalhe só
+            // de leitura — é por aqui que o gestor confere foto e sinal antes
+            // de aprovar, e antes a linha simplesmente não respondia pra ele.
+            <button
               key={ponto.id}
-              onClick={clicavel ? () => setPontoEmMedicao(ponto) : undefined}
+              onClick={() => (podeMedir ? setPontoEmMedicao(ponto) : setPontoEmDetalhe(ponto))}
               className={cn(
-                'w-full flex items-center gap-3 bg-white dark:bg-slate-900 rounded-2xl border p-3 text-left transition-colors',
+                'w-full flex items-center gap-3 bg-white dark:bg-slate-900 rounded-2xl border p-3 text-left transition-colors hover:border-amber-300',
                 ponto.refazer
                   ? 'border-orange-300 dark:border-orange-800'
                   : 'border-slate-200 dark:border-slate-800',
-                clicavel && 'hover:border-amber-300',
               )}
             >
               {ponto.storagePath
@@ -481,7 +635,7 @@ export default function CertificacaoDetalhe() {
               <span className={cn('text-[10px] font-black px-2 py-1 rounded-full shrink-0', RESULTADO_COR[resultado])}>
                 {RESULTADO_LABEL[resultado]}
               </span>
-            </Tag>
+            </button>
           );
         })}
       </div>
@@ -551,6 +705,10 @@ export default function CertificacaoDetalhe() {
           onClose={() => setPontoEmMedicao(null)}
           onSalvo={carregar}
         />
+      )}
+
+      {pontoEmDetalhe && (
+        <DetalhePontoModal ponto={pontoEmDetalhe} ordem={ordem} onClose={() => setPontoEmDetalhe(null)} />
       )}
 
       {showDevolver && (
