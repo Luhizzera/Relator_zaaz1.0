@@ -550,7 +550,7 @@ export default function CertificacaoDetalhe() {
   if (!ordem || !resumo) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-6 space-y-6">
-        <PageHeader title="Certificação" backTo="/certificacao/ordens" />
+        <PageHeader title="Certificação" backTo="/certificacao/ordens" showMenu={false} />
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-10 text-center">
           <p className="text-sm text-slate-400">Certificação não encontrada, ou sem permissão para vê-la.</p>
         </div>
@@ -564,6 +564,7 @@ export default function CertificacaoDetalhe() {
         title={ordem.numero}
         subtitle={ordem.titulo}
         backTo="/certificacao/ordens"
+        showMenu={false}
         rightContent={(
           <button
             onClick={baixarPdf}

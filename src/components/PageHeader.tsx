@@ -13,6 +13,13 @@ interface PageHeaderProps {
   backTo?: string;
   /** Permite ocultar o botão voltar (ex: telas raiz). Padrão: true. */
   showBack?: boolean;
+  /**
+   * Para gestor/supervisor, o ☰ da sidebar substitui o voltar. Desligue em
+   * tela de detalhe (dentro de uma OS), onde voltar para a lista é a ação
+   * esperada e a sidebar não leva de volta ao lugar de onde se veio.
+   * Padrão: true.
+   */
+  showMenu?: boolean;
   /** Conteúdo à direita do header (ex: botão "Nova OS"). */
   rightContent?: ReactNode;
   /** Permite ocultar o botão de tema, caso a tela já tenha o seu próprio. Padrão: true. */
@@ -28,12 +35,17 @@ interface PageHeaderProps {
  * Gestor/supervisor veem um botão ☰ que abre a sidebar global em vez do
  * "voltar" — faz mais sentido pra quem navega entre várias seções de topo o
  * dia todo. Técnico continua vendo o "voltar" normal.
+ *
+ * Numa tela de DETALHE, passe `showMenu={false}`: ali a sidebar não leva de
+ * volta à lista de onde se veio, e sem isso quem gerencia fica sem saída
+ * visível (ver telas de detalhe que usam BackButton direto).
  */
 export function PageHeader({
   title,
   subtitle,
   backTo,
   showBack = true,
+  showMenu = true,
   rightContent,
   showThemeToggle = true,
   className,
@@ -45,7 +57,7 @@ export function PageHeader({
     <div className={cn('flex items-center justify-between gap-3 flex-wrap', className)}>
       <div className="flex items-center gap-3 min-w-0">
         {showBack && (
-          canManageOrders
+          canManageOrders && showMenu
             ? (
               <button
                 onClick={openSidebar}
