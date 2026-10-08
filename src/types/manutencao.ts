@@ -175,54 +175,185 @@ export const PRIORIDADE_LABEL: Record<PrioridadeOS, string> = {
   critica: 'Crítica',
 };
 
-// Opções de checklist de problemas de CTO — usadas tanto na abertura da OS
-// (NovaOrdemManutencao.tsx, "Problema informado") quanto no registro de
-// ocorrências durante a execução (ManutencaoExecucaoMobile.tsx), pra ser
-// exatamente a mesma caixa de seleção nos dois lugares. Agrupadas por
-// família de equipamento — uma lista de 14 itens sem separação virava uma
-// parede de texto pra escanear no celular.
-export const PROBLEMAS_CTO_GRUPOS: { grupo: string; itens: string[] }[] = [
-  {
-    grupo: 'CTO',
-    itens: [
-      'CTO quebrada',
-      'CTO sem tampa',
-      'CTO solta do poste',
-      'CTO apresenta infestação de formigas',
-      // O "(sem nome)" faz parte do valor gravado, para a distinção aparecer
-      // também no detalhe da OS e no relatório, e não só no formulário. A falta
-      // de plaqueta física não fica aqui: ela foi para o grupo Rede.
-      'CTO sem identificação (sem nome)',
-    ],
-  },
-  {
-    grupo: 'Splitter',
-    itens: ['Splitter quebrado', 'Splitter atenuado', 'Splitter roubado'],
-  },
-  {
-    grupo: 'Adaptador/acoplador',
-    itens: ['Adaptador/acoplador danificado', 'Adaptador/acoplador roubado', 'Adaptador/acoplador atenuado'],
-  },
-  {
-    grupo: 'Drop',
-    itens: [
-      'Drop danificado',
-      'Drop sem anilha de identificação',
-      'Drop com conector quebrado',
-      'Drop com conector roubado',
-      'Drop atenuado',
-    ],
-  },
-  {
-    // Plaqueta de identificação é da rede, e não só da caixa — por isso não
-    // fica no grupo CTO.
-    grupo: 'Rede',
-    itens: ['Rede sem identificação (sem plaqueta)'],
-  },
-];
+/**
+ * Os cinco templates de manutenção. Cada um abre a SUA árvore de atividades
+ * (`ATIVIDADES_POR_TIPO`) — antes havia uma lista única de problemas de CTO
+ * para todo tipo de OS, o que obrigava quem abre uma preventiva de backbone a
+ * procurar a atividade dela no meio de drop e splitter.
+ *
+ * A troca também é o que permite o relatório discriminar quantidade por
+ * atividade e por estado: com vocabulário por template, "cabo baixo no BKB" e
+ * "drop danificado na CTO" deixam de cair no mesmo balaio.
+ *
+ * OS abertas antes desta mudança guardam tipos que não estão mais aqui
+ * ('Manutenção Corretiva', 'Instalação', 'Vistoria Técnica'...). Elas seguem
+ * sendo exibidas e filtradas pelo tipo que têm; a lista abaixo só governa o
+ * que pode ser aberto de agora em diante.
+ */
+export const TIPOS_MANUTENCAO = [
+  'Preventiva BKB',
+  'Preventiva Rede Acesso (GPON)',
+  'Preventiva CTO',
+  'Identificação',
+  'Troca de Poste',
+] as const;
 
-/** Lista achatada — pra código que só precisa iterar/validar sem se importar com o agrupamento (ex: `SOLUCAO_PROBLEMA_CTO`). */
-export const PROBLEMAS_CTO = PROBLEMAS_CTO_GRUPOS.flatMap((g) => g.itens);
+export type TipoManutencao = (typeof TIPOS_MANUTENCAO)[number];
+
+/**
+ * Explícito em vez de `TIPOS_MANUTENCAO[0]`: o padrão não é "o primeiro da
+ * lista", e deixá-lo posicional faria reordenar o seletor trocar o padrão sem
+ * querer. É o tipo que o fluxo de vistoria mais gera.
+ */
+export const TIPO_MANUTENCAO_PADRAO: TipoManutencao = 'Preventiva CTO';
+
+export interface GrupoDeAtividades {
+  /** Sem título quando a árvore é curta o bastante para não precisar de seções. */
+  grupo?: string;
+  itens: string[];
+}
+
+/**
+ * A árvore de atividades de cada template, na ordem e com a grafia definidas
+ * pela operação — é esse texto que vai para o banco, para o PDF e para a
+ * contagem do relatório, então mudá-lo exige migrar o histórico junto (ver
+ * supabase/migrations/0024_atividades_por_tipo.sql).
+ *
+ * A mesma atividade aparece em mais de uma árvore quando cabe em mais de um
+ * serviço ('Cabo Solto' está no BKB, no GPON e na troca de poste). O texto é
+ * o mesmo nos três de propósito: o relatório soma por atividade, e duas
+ * grafias virariam duas linhas.
+ */
+export const ATIVIDADES_POR_TIPO: Record<TipoManutencao, GrupoDeAtividades[]> = {
+  'Preventiva BKB': [
+    {
+      grupo: 'Cabo',
+      itens: [
+        'Cabo não identificado',
+        'Cabo Solto',
+        'Sobra Tec. acomodada indevidamente ou não acomodada',
+        'cabo baixo',
+        'Cruzamento abaixo de 5m',
+      ],
+    },
+    {
+      grupo: 'Espinação e cordoalha',
+      itens: ['Espinação Solta', 'Espinação Arrebentada', 'Cordoalha arrebentada'],
+    },
+    {
+      grupo: 'Caixa subterrânea e CEO',
+      itens: [
+        'Caixa Sub sem tampa',
+        'Cabo enterrado Exposto (cabo/ceo)',
+        'Subida lateral faltando acabamento (Duto/Canaleta/Fita de aço/Plaqueta)',
+        'CEO fora da caixa Sub',
+      ],
+    },
+    {
+      grupo: 'Vegetação',
+      itens: ['Necessidade de aceiro', 'necessidade de Poda de árvore', 'necessidade de roçada'],
+    },
+    {
+      grupo: 'Poste',
+      itens: [
+        'Poste de madeira/concreto quebrado',
+        'Poste fora de Prumo',
+        'Poste fletido',
+        'Realocação de poste',
+        'poste baixo (cruzamento de rua)',
+      ],
+    },
+  ],
+
+  'Preventiva Rede Acesso (GPON)': [
+    {
+      grupo: 'Cabo',
+      itens: [
+        'Cabo não identificado',
+        'Cabo Solto',
+        'Sobra Tec. acomodada indevidamente ou não acomodada',
+        'cabo baixo',
+        'Cruzamento abaixo de 5m',
+      ],
+    },
+    {
+      grupo: 'Espinação e cordoalha',
+      itens: ['Espinação Solta', 'Espinação Arrebentada', 'Cordoalha arrebentada'],
+    },
+  ],
+
+  'Preventiva CTO': [
+    {
+      grupo: 'CTO',
+      itens: ['CTO Quebrada', 'CTO Sem Tampa', 'CTO Solta', 'CTO Apresenta Infestação de Formigas'],
+    },
+    {
+      grupo: 'Splitter',
+      itens: ['Splitter Quebrado', 'Splitter Atenuado', 'Splitter Roubado'],
+    },
+    {
+      grupo: 'Adaptador/acoplador',
+      itens: ['Adaptador/Acoplador Danificado', 'Adaptador/Acoplador Roubado'],
+    },
+    {
+      grupo: 'Drop',
+      itens: [
+        'Drop Danificado',
+        'Drop sem anilha de Identificação',
+        'Drop com conector quebrado',
+        'Drop com atenuação',
+      ],
+    },
+  ],
+
+  Identificação: [
+    {
+      itens: [
+        'Numeração incompleta',
+        'Numeração incorreta',
+        'CTO com identificação interna (falta externa)',
+      ],
+    },
+  ],
+
+  'Troca de Poste': [
+    {
+      itens: [
+        'Cabo Solto',
+        'Faltando BAP',
+        'CTO Solta',
+        'Drop Solto',
+        'CEO Solta',
+        'Cabo cortado',
+        'Rede sem identificação (plaquetas)',
+      ],
+    },
+  ],
+};
+
+/**
+ * A árvore do tipo escolhido. Tipo antigo (OS aberta antes dos cinco
+ * templates) não tem árvore: devolve vazio em vez de quebrar, e a tela cai no
+ * caminho de "descreva na observação".
+ */
+export const atividadesDoTipo = (tipo: string): GrupoDeAtividades[] =>
+  ATIVIDADES_POR_TIPO[tipo as TipoManutencao] ?? [];
+
+/** Lista achatada de tudo que pode ser marcado hoje — para validar e para o relatório. */
+export const TODAS_AS_ATIVIDADES = Array.from(new Set(
+  Object.values(ATIVIDADES_POR_TIPO).flatMap((grupos) => grupos.flatMap((g) => g.itens)),
+));
+
+/**
+ * O que a vistoria oferece quando o técnico registra uma pendência em rota:
+ * as árvores dos dois tipos de corretiva que a vistoria gera (ver
+ * TIPOS_CORRETIVA_VISTORIA em types/vistoria.ts). O que for marcado vira
+ * ocorrência e checklist na corretiva, sem ninguém redigitar.
+ */
+export const ATIVIDADES_VISTORIA: GrupoDeAtividades[] = [
+  ...ATIVIDADES_POR_TIPO['Preventiva CTO'],
+  ...ATIVIDADES_POR_TIPO['Preventiva Rede Acesso (GPON)'],
+];
 
 /**
  * `problemaInformado` é salvo como string serializada por `||` (mesma
@@ -236,23 +367,82 @@ export const deserializeProblemas = (value?: string | null): string[] =>
 /** Contraparte de `deserializeProblemas` — usada na abertura da OS e no registro de pendência de vistoria, pra que os dois gravem no mesmo formato. */
 export const serializeProblemas = (selected: string[]): string => selected.join('||');
 
-// A cada problema reportado (na abertura da OS ou numa ocorrência durante a
-// execução) corresponde uma "solução" — é isso que vira item de checklist,
-// não o problema em si (ex: "CTO quebrada" no checklist não faz sentido
-// marcar como concluído; "CTO reparada" faz).
-export const SOLUCAO_PROBLEMA_CTO: Record<string, string> = {
+/**
+ * A cada atividade reportada (na abertura da OS ou numa ocorrência durante a
+ * execução) corresponde uma "solução" — é isso que vira item de checklist, e
+ * não a atividade em si (ex: "CTO Quebrada" no checklist não faz sentido
+ * marcar como concluído; "CTO reparada/substituída" faz).
+ *
+ * Atividade sem entrada aqui vira item de checklist com o próprio texto (ver
+ * `sincronizarOcorrenciasEChecklist`), então faltar uma não quebra nada — só
+ * deixa o checklist esquisito.
+ */
+export const SOLUCAO_DA_ATIVIDADE: Record<string, string> = {
+  // Cabo e espinação (BKB, GPON e troca de poste)
+  'Cabo não identificado': 'Cabo identificado (plaqueta instalada)',
+  'Cabo Solto': 'Cabo fixado',
+  'Sobra Tec. acomodada indevidamente ou não acomodada': 'Sobra técnica acomodada',
+  'cabo baixo': 'Altura do cabo corrigida',
+  'Cruzamento abaixo de 5m': 'Altura do cruzamento corrigida',
+  'Espinação Solta': 'Espinação refeita',
+  'Espinação Arrebentada': 'Espinação substituída',
+  'Cordoalha arrebentada': 'Cordoalha substituída',
+  'Cabo cortado': 'Cabo emendado/substituído',
+
+  // Caixa subterrânea e CEO
+  'Caixa Sub sem tampa': 'Tampa da caixa subterrânea reposta',
+  'Cabo enterrado Exposto (cabo/ceo)': 'Cabo enterrado protegido/reenterrado',
+  'Subida lateral faltando acabamento (Duto/Canaleta/Fita de aço/Plaqueta)': 'Acabamento da subida lateral instalado',
+  'CEO fora da caixa Sub': 'CEO reacomodada na caixa subterrânea',
+  'CEO Solta': 'CEO fixada',
+
+  // Vegetação
+  'Necessidade de aceiro': 'Aceiro executado',
+  'necessidade de Poda de árvore': 'Poda executada',
+  'necessidade de roçada': 'Roçada executada',
+
+  // Poste
+  'Poste de madeira/concreto quebrado': 'Poste substituído',
+  'Poste fora de Prumo': 'Poste aprumado',
+  'Poste fletido': 'Poste substituído/corrigido',
+  'Realocação de poste': 'Poste realocado',
+  'poste baixo (cruzamento de rua)': 'Altura do poste corrigida',
+  'Faltando BAP': 'BAP instalado',
+
+  // CTO e acessórios
+  'CTO Quebrada': 'CTO reparada/substituída',
+  'CTO Sem Tampa': 'Tampa da CTO reposta',
+  'CTO Solta': 'CTO fixada no poste',
+  'CTO Apresenta Infestação de Formigas': 'Infestação eliminada e CTO vedada',
+  'Splitter Quebrado': 'Splitter substituído',
+  'Splitter Atenuado': 'Splitter substituído/regulado',
+  'Splitter Roubado': 'Splitter reinstalado',
+  'Adaptador/Acoplador Danificado': 'Adaptador/acoplador substituído',
+  'Adaptador/Acoplador Roubado': 'Adaptador/acoplador reinstalado',
+  'Drop Danificado': 'Drop substituído',
+  'Drop sem anilha de Identificação': 'Anilha de identificação instalada no drop',
+  'Drop com conector quebrado': 'Conector do drop substituído',
+  'Drop com atenuação': 'Drop substituído/regulado',
+  'Drop Solto': 'Drop fixado',
+
+  // Identificação
+  'Numeração incompleta': 'Numeração completada',
+  'Numeração incorreta': 'Numeração corrigida',
+  'CTO com identificação interna (falta externa)': 'Identificação externa da CTO instalada',
+  'Rede sem identificação (plaquetas)': 'Plaqueta de identificação instalada na rede',
+
+  // Grafias de antes da migração 0024. A migração reescreve o histórico, mas
+  // estas ficam porque uma OS duplicada ou um backup restaurado ainda pode
+  // trazer o texto velho — e aí o problema continua gerando a solução certa.
   'CTO quebrada': 'CTO reparada/substituída',
   'CTO sem tampa': 'Tampa da CTO reposta',
   'CTO solta do poste': 'CTO fixada no poste',
   'CTO apresenta infestação de formigas': 'Infestação eliminada e CTO vedada',
   'CTO sem identificação (sem nome)': 'Nome da CTO identificado e cadastrado',
-  'Rede sem identificação (sem plaqueta)': 'Plaqueta de identificação instalada na rede',
-  // Nomes anteriores, ainda gravados em OS antigas. Ao duplicar uma delas, o
-  // problema continua gerando a solução atual, em vez de virar item de
-  // checklist com o próprio texto do problema.
   'CTO não identificada': 'Plaqueta de identificação instalada na rede',
   'CTO sem plaquetas de identificação': 'Plaqueta de identificação instalada na rede',
   'CTO sem identificação': 'Nome da CTO identificado e cadastrado',
+  'Rede sem identificação (sem plaqueta)': 'Plaqueta de identificação instalada na rede',
   'Splitter quebrado': 'Splitter substituído',
   'Splitter atenuado': 'Splitter substituído/regulado',
   'Splitter roubado': 'Splitter reinstalado',
@@ -261,7 +451,6 @@ export const SOLUCAO_PROBLEMA_CTO: Record<string, string> = {
   'Adaptador/acoplador atenuado': 'Adaptador/acoplador substituído/regulado',
   'Drop danificado': 'Drop substituído',
   'Drop sem anilha de identificação': 'Anilha de identificação instalada no drop',
-  'Drop com conector quebrado': 'Conector do drop substituído',
   'Drop com conector roubado': 'Conector do drop reinstalado',
   'Drop atenuado': 'Drop substituído/regulado',
 };

@@ -159,11 +159,23 @@ async function coletar() {
   const { error: erroLogin } = await supabase.auth.signInWithPassword({ email: EMAIL, password: SENHA });
   if (erroLogin) abortar(`Não foi possível autenticar como ${EMAIL}: ${erroLogin.message}`);
 
-  const { data, error } = await supabase
-    .from('ordens_manutencao')
-    .select('*, tecnico:tecnico_id ( nome ), equipe:equipe_id ( nome )')
-    .order('created_at', { ascending: false });
-  if (error) abortar(`Falha ao ler as ordens: ${error.message}`);
+  // Paginado porque o PostgREST corta a resposta em 1000 linhas e NÃO avisa:
+  // passar disso devolveria um relatório com menos ordens do que existem, sem
+  // erro nenhum — o tipo de falha que só aparece quando alguém desconfia do
+  // número. Mesmo motivo do consultaEmLotes.ts no app.
+  const paginar = async (tabela, select) => {
+    const linhas = [];
+    for (let inicio = 0; ; inicio += 1000) {
+      const { data, error } = await supabase
+        .from(tabela).select(select).order('id', { ascending: true })
+        .range(inicio, inicio + 999);
+      if (error) abortar(`Falha ao ler ${tabela}: ${error.message}`);
+      linhas.push(...(data ?? []));
+      if ((data ?? []).length < 1000) return linhas;
+    }
+  };
+
+  const data = await paginar('ordens_manutencao', '*, tecnico:tecnico_id ( nome ), equipe:equipe_id ( nome )');
 
   // Zero linhas com login OK quase sempre significa conta sem permissão de
   // gestor/supervisor — vale barrar aqui em vez de gerar um relatório vazio
@@ -172,10 +184,26 @@ async function coletar() {
     abortar(`A consulta voltou vazia. Confirme que ${EMAIL} tem papel de gestor ou supervisor.`);
   }
 
+  // As atividades vêm das OCORRÊNCIAS, e não do `problema_informado` da OS:
+  // a abertura já grava uma ocorrência por atividade marcada (ver
+  // createManutencaoOrder), e o técnico acrescenta as que achar em campo.
+  // Contar pelo campo da OS perderia justamente o que foi descoberto no local.
+  const ocorrencias = await paginar('ocorrencias_manutencao', 'ordem_id, tipo, quantidade');
+
   await supabase.auth.signOut();
+
+  const ocorrenciasPorOrdem = new Map();
+  for (const oc of ocorrencias) {
+    const lista = ocorrenciasPorOrdem.get(oc.ordem_id) ?? [];
+    lista.push({ atividade: (oc.tipo ?? '').trim(), quantidade: Number(oc.quantidade) || 1 });
+    ocorrenciasPorOrdem.set(oc.ordem_id, lista);
+  }
+
   return data.map((o) => ({
     numero: o.numero,
     status: o.status,
+    tipo: o.tipo ?? '—',
+    atividades: (ocorrenciasPorOrdem.get(o.id) ?? []).filter((a) => a.atividade),
     prioridade: o.prioridade,
     solicitante: o.solicitante ?? '',
     uf: (o.uf ?? '').toUpperCase(),
@@ -239,6 +267,30 @@ function apurar(ordens, agora) {
     })
     .sort((a, b) => b.total - a.total);
 
+  // Quantidade por atividade e por estado — o recorte que o gestor pediu, e o
+  // motivo de cada template ter a sua própria árvore: com vocabulário
+  // separado, "cabo baixo no backbone" e "drop danificado na CTO" deixam de
+  // cair no mesmo balaio.
+  //
+  // A ordem das colunas é a mesma da tabela de regiões (maior volume primeiro),
+  // pra quem lê não ter que reencontrar o estado a cada tabela.
+  const matriz = (chaveDe) => {
+    const porChave = new Map();
+    for (const o of vivas) {
+      const uf = o.uf || '—';
+      for (const [chave, quantidade] of chaveDe(o)) {
+        const linha = porChave.get(chave) ?? { chave, porUf: {}, total: 0 };
+        linha.porUf[uf] = (linha.porUf[uf] ?? 0) + quantidade;
+        linha.total += quantidade;
+        porChave.set(chave, linha);
+      }
+    }
+    return [...porChave.values()].sort((a, b) => b.total - a.total || a.chave.localeCompare(b.chave, 'pt-BR'));
+  };
+
+  const atividades = matriz((o) => o.atividades.map((a) => [a.atividade, a.quantidade]));
+  const tipos = matriz((o) => [[o.tipo, 1]]);
+
   // O foco do panorama acompanha o problema em vez de ficar preso ao Paraná:
   // se a região travada mudar, o relatório aponta pra outra sozinho.
   const foco = [...regioes].sort((a, b) => b.semTecnico.length - a.semTecnico.length)[0];
@@ -246,6 +298,10 @@ function apurar(ordens, agora) {
   const maisAntiga = foco.semTecnico.reduce((pior, o) => (!pior || o.createdAt < pior.createdAt ? o : pior), null);
 
   return {
+    ufs: regioes.map((r) => r.uf),
+    atividades,
+    atividadesTotal: atividades.reduce((t, a) => t + a.total, 0),
+    tipos,
     total: vivas.length,
     // Não entra em nenhum texto, mas aparece no log da execução: sem isso, uma
     // queda no total entre dois dias fica sem explicação para quem confere.
@@ -275,7 +331,7 @@ function apurar(ordens, agora) {
 }
 
 // ── Excel ───────────────────────────────────────────────────────────
-async function gerarXlsx(ordens, destino) {
+async function gerarXlsx(ordens, metricas, destino) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'SurveyOS';
   wb.created = new Date();
@@ -285,6 +341,7 @@ async function gerarXlsx(ordens, destino) {
   // e manual serem intercambiáveis.
   const colunas = [
     ['Número', 'numero', 16], ['Status', 'status', 20], ['Prioridade', 'prioridade', 12],
+    ['Tipo', 'tipo', 26], ['Atividades', 'atividades', 46],
     ['Solicitante', 'solicitante', 22], ['UF', 'uf', 8], ['Cidade', 'cidade', 18],
     ['Bairro', 'bairro', 18], ['Endereço', 'endereco', 30], ['UTM', 'utm', 24],
     ['Equipe', 'equipe', 16], ['Técnico', 'tecnico', 20],
@@ -302,6 +359,10 @@ async function gerarXlsx(ordens, destino) {
       numero: o.numero,
       status: STATUS_LABEL[o.status] ?? o.status,
       prioridade: PRIORIDADE_LABEL[o.prioridade] ?? o.prioridade,
+      tipo: o.tipo,
+      // Uma célula por OS, com as atividades separadas por ponto e vírgula —
+      // a contagem por atividade fica na aba própria, aqui é só o registro.
+      atividades: o.atividades.map((a) => a.atividade).join('; '),
       solicitante: o.solicitante,
       uf: o.uf,
       cidade: o.municipio,
@@ -312,6 +373,24 @@ async function gerarXlsx(ordens, destino) {
       tecnico: o.tecnico,
       prazo: o.dataPrevista,
       abertura: o.createdAt,
+    });
+  }
+
+  // Aba da matriz: é onde o gestor confere a conta que o e-mail resume, e
+  // onde dá pra filtrar/ordenar sem depender do que coube no corpo da mensagem.
+  const wsAtiv = wb.addWorksheet('Atividades por estado', { views: [{ state: 'frozen', ySplit: 1, xSplit: 1 }] });
+  wsAtiv.columns = [
+    { header: 'Atividade', key: 'atividade', width: 52 },
+    ...metricas.ufs.map((uf) => ({ header: uf, key: `uf_${uf}`, width: 10 })),
+    { header: 'Total', key: 'total', width: 10 },
+  ];
+  wsAtiv.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  wsAtiv.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F6F68' } };
+  for (const linha of metricas.atividades) {
+    wsAtiv.addRow({
+      atividade: linha.chave,
+      ...Object.fromEntries(metricas.ufs.map((uf) => [`uf_${uf}`, linha.porUf[uf] ?? 0])),
+      total: linha.total,
     });
   }
 
@@ -536,7 +615,7 @@ const carimbo = [
 const destinoXlsx = path.join(PASTA, `Resumo-survey_os_${carimbo}.xlsx`);
 const destinoDocx = path.join(PASTA, `Resumo_atividade_SurveyOS_${carimbo}.docx`);
 
-await gerarXlsx(ordens, destinoXlsx);
+await gerarXlsx(ordens, metricas, destinoXlsx);
 await gerarDocx(metricas, agora, destinoDocx);
 
 console.log(`[resumo-atividade] ${carimbo} — ${metricas.total} OS · ${metricas.encerradas} encerradas · `
@@ -587,6 +666,35 @@ if (idxSumario > -1) {
     return `tudo delegado · ${r.encerradas} de ${r.total} encerradas`;
   };
 
+  /**
+   * Matriz atividade (ou tipo) x estado. Uma tabela só, com o estado nas
+   * colunas, em vez de um bloco por estado: o gestor compara regiões lendo a
+   * linha, que é a pergunta que ele faz — "onde isto está acontecendo mais?".
+   *
+   * Zero vira vazio de propósito: uma parede de "0" esconde os números que
+   * importam.
+   */
+  const tabelaMatriz = (titulo, linhas) => {
+    if (!linhas.length) {
+      return '<p style="color:#667a80;font-size:13px;margin:0 0 18px">Nada registrado no período.</p>';
+    }
+    const cabecalho = `<tr style="background:#1f6f68;color:#fff">
+      <th style="padding:8px 12px;text-align:left">${titulo}</th>
+      ${m.ufs.map((uf) => `<th style="padding:8px 10px;text-align:right">${uf}</th>`).join('')}
+      <th style="padding:8px 12px;text-align:right">Total</th>
+    </tr>`;
+    const corpo = linhas.map((l) => `<tr>
+      <td style="padding:6px 12px;border-bottom:1px solid #e6ecec">${l.chave}</td>
+      ${m.ufs.map((uf) => `<td style="padding:6px 10px;border-bottom:1px solid #e6ecec;text-align:right;color:${
+  l.porUf[uf] ? '#101618' : '#c3cdcf'}">${l.porUf[uf] || '·'}</td>`).join('')}
+      <td style="padding:6px 12px;border-bottom:1px solid #e6ecec;text-align:right"><b>${l.total}</b></td>
+    </tr>`).join('\n    ');
+    return `<table style="border-collapse:collapse;font-size:13px;width:100%;margin:0 0 18px">
+    ${cabecalho}
+    ${corpo}
+  </table>`;
+  };
+
   const linhaRegiao = (r) => `<tr>
       <td style="padding:6px 12px;border-bottom:1px solid #e6ecec"><b>${r.uf}</b></td>
       <td style="padding:6px 12px;border-bottom:1px solid #e6ecec;color:${
@@ -623,6 +731,13 @@ if (idxSumario > -1) {
       <td valign="top" style="padding:3px 0;line-height:1.5">${pontoDaRegiao(r)}</td>
     </tr>`).join('\n    ')}
   </table>
+  <p style="font-size:11px;font-weight:700;letter-spacing:2px;color:#1f6f68;margin:0 0 8px">ORDENS POR TIPO E ESTADO</p>
+  ${tabelaMatriz('Tipo de manutenção', m.tipos)}
+  <p style="font-size:11px;font-weight:700;letter-spacing:2px;color:#1f6f68;margin:0 0 4px">ATIVIDADES POR ESTADO</p>
+  <p style="color:#667a80;font-size:12px;margin:0 0 8px">
+    ${m.atividadesTotal} atividade(s) registrada(s) nas ${m.total} ordens — contadas na abertura e no que o técnico achou em campo.
+  </p>
+  ${tabelaMatriz('Atividade', m.atividades)}
   <p style="color:#667a80;font-size:12px;margin:0">
     Planilha e documento completos em anexo. Gerado automaticamente pelo SurveyOS — não responda a este e-mail.
   </p>

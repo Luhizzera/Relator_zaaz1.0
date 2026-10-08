@@ -19,7 +19,9 @@ import type {
   TipoEquipe,
   UserRole,
 } from '@/lib/supabaseClient';
-import { ManutencaoOrdem, StatusOS, ChecklistItemOS, SOLUCAO_PROBLEMA_CTO } from '@/types/manutencao';
+import {
+  ManutencaoOrdem, StatusOS, ChecklistItemOS, SOLUCAO_DA_ATIVIDADE, TIPO_MANUTENCAO_PADRAO,
+} from '@/types/manutencao';
 import { normalizarNomeCidade, normalizarUf } from '@/lib/geocoding';
 import { buscarPorIds, buscarTudo } from '@/lib/consultaEmLotes';
 
@@ -255,7 +257,7 @@ async function registrarHistorico(ordemId: string, acao: string, descricao?: str
  * wizard) e o registro de ocorrências durante a execução — os dois casos
  * precisam do mesmo efeito: uma linha em `ocorrencias_manutencao` por
  * problema, e um item de checklist com a "solução" correspondente (ver
- * `SOLUCAO_PROBLEMA_CTO`), criado só se ainda não existir, pra não duplicar
+ * `SOLUCAO_DA_ATIVIDADE`), criado só se ainda não existir, pra não duplicar
  * quando o mesmo problema aparecer em mais de uma ocorrência.
  */
 async function sincronizarOcorrenciasEChecklist(
@@ -285,7 +287,7 @@ async function sincronizarOcorrenciasEChecklist(
 
   const labelsExistentes = new Set((existentes ?? []).map((c) => c.label));
   const proximoIndexBase = Math.max(-1, ...(existentes ?? []).map((c) => c.ordem_index)) + 1;
-  const solucoes = Array.from(new Set(problemas.map((p) => SOLUCAO_PROBLEMA_CTO[p] ?? p)));
+  const solucoes = Array.from(new Set(problemas.map((p) => SOLUCAO_DA_ATIVIDADE[p] ?? p)));
   const novosItens = solucoes.filter((label) => !labelsExistentes.has(label));
 
   if (novosItens.length > 0) {
@@ -409,7 +411,7 @@ export async function createManutencaoOrder(
   const userId = userData.user?.id ?? null;
 
   const insertPayload = {
-    tipo: partial.tipo ?? 'Manutenção Corretiva',
+    tipo: partial.tipo ?? TIPO_MANUTENCAO_PADRAO,
     origem: partial.origem ?? 'Sistema',
     prioridade: partial.prioridade ?? 'media',
     status: 'aberta' as StatusOS,
@@ -578,11 +580,11 @@ export async function atualizarReferenciaExterna(ordemId: string, valor: string 
 
 /**
  * Registra uma ou mais ocorrências de uma vez — a seleção vem da mesma caixa
- * de checklist usada na abertura da OS (`PROBLEMAS_CTO` em
+ * de checklist usada na abertura da OS (`ATIVIDADES_POR_TIPO` em
  * NovaOrdemManutencao.tsx), não mais de um dropdown de tipo único.
  *
  * Cada problema marcado também garante um item de checklist com a solução
- * correspondente (`SOLUCAO_PROBLEMA_CTO`) — criado só se ainda não existir,
+ * correspondente (`SOLUCAO_DA_ATIVIDADE`) — criado só se ainda não existir,
  * pra não duplicar quando o mesmo problema for reportado em ocorrências
  * diferentes (inclusive as já registradas na abertura da OS).
  */

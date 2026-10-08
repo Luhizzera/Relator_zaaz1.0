@@ -416,7 +416,7 @@ export interface PendenciaVistoriaRow {
   latitude: number;
   longitude: number;
   observacao: string | null;
-  /** Problemas marcados em campo, serializados por '||' — mesmo vocabulário de PROBLEMAS_CTO_GRUPOS (ver migração 0022). */
+  /** Problemas marcados em campo, serializados por '||' — mesmo vocabulário de ATIVIDADES_VISTORIA (ver migrações 0022 e 0024). */
   problemas: string | null;
   /** Nula = ainda não gerou OS corretiva (pino vermelho). */
   ordem_corretiva_id: string | null;

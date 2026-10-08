@@ -31,7 +31,7 @@ export interface PendenciaVistoria {
   observacao?: string | null;
   /**
    * Problemas marcados pelo técnico em campo, serializados por '||' — mesmo
-   * vocabulário de PROBLEMAS_CTO_GRUPOS. Vira `problemaInformado` da OS
+   * vocabulário de ATIVIDADES_VISTORIA. Vira `problemaInformado` da OS
    * corretiva, que por sua vez gera ocorrências e checklist de solução.
    */
   problemas?: string | null;
@@ -148,5 +148,5 @@ export function corDaOrdem(status: string): CorPendencia {
 }
 
 /** Tipos de OS corretiva gerados a partir de uma pendência — ver TIPOS em NovaOrdemManutencao.tsx. */
-export const TIPOS_CORRETIVA_VISTORIA = ['Preventiva CTO', 'Preventiva Rede'] as const;
+export const TIPOS_CORRETIVA_VISTORIA = ['Preventiva CTO', 'Preventiva Rede Acesso (GPON)'] as const;
 export type TipoCorretivaVistoria = (typeof TIPOS_CORRETIVA_VISTORIA)[number];

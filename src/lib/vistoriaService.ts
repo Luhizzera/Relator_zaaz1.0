@@ -366,7 +366,7 @@ export async function gerarOSCorretivaDaPendencia(
     // O que o técnico marcou em campo. `createManutencaoOrder` repassa isso
     // pra sincronizarOcorrenciasEChecklist, que cria as ocorrências reais e
     // ACRESCENTA ao checklist padrão os itens de solução correspondentes
-    // (SOLUCAO_PROBLEMA_CTO) — sem ninguém preencher à mão. Note que é
+    // (SOLUCAO_DA_ATIVIDADE) — sem ninguém preencher à mão. Note que é
     // acréscimo, não substituição: os 6 itens genéricos de higiene de CTO
     // continuam lá, então a corretiva nasce com 6 + um por problema marcado.
     problemaInformado: pendencia.problemas ?? undefined,

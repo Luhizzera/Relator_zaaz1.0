@@ -11,7 +11,8 @@ import { toast } from '@/hooks/use-toast';
 import { normalizarFoto, mensagemErroFoto } from '@/lib/normalizarFoto';
 import { createManutencaoOrder, addFotoManutencao } from '@/lib/manutencaoService';
 import {
-  PrioridadeOS, PRIORIDADE_LABEL, PROBLEMAS_CTO_GRUPOS, deserializeProblemas, serializeProblemas,
+  PrioridadeOS, PRIORIDADE_LABEL, TIPOS_MANUTENCAO, TIPO_MANUTENCAO_PADRAO, atividadesDoTipo,
+  deserializeProblemas, serializeProblemas,
 } from '@/types/manutencao';
 import { useAuth } from '@/contexts/AuthContext';
 import { BackButton } from '@/components/BackButton';
@@ -27,13 +28,6 @@ const STEPS: { key: Step; label: string }[] = [
   { key: 'localizacao', label: 'Localização' },
 ];
 
-const TIPOS = [
-  'Manutenção Corretiva', 'Manutenção Preventiva', 'Manutenção Preditiva', 'Instalação', 'Vistoria Técnica',
-  // Preventiva CTO/Rede — normalmente nascem do fluxo de pendência do módulo
-  // de Vistoria (ver vistoriaService.ts), mas continuam selecionáveis aqui
-  // pra quando o problema já é identificado sem passar por uma rota.
-  'Preventiva CTO', 'Preventiva Rede',
-];
 const ORIGENS = ['Chamado do cliente', 'Sistema', 'Fiscalização', 'Solicitação interna'];
 // Explícito em vez de ORIGENS[0]: o padrão não é "a primeira da lista", e
 // deixá-lo posicional faria reordenar o select trocar o padrão sem querer.
@@ -132,7 +126,7 @@ export default function NovaOrdemManutencao() {
   const [form, setForm] = useState(() => {
     const previsto = new Date(Date.now() + 48 * 60 * 60 * 1000); // +48h a partir da abertura
     return {
-      tipo: TIPOS[0],
+      tipo: TIPO_MANUTENCAO_PADRAO,
       origem: ORIGEM_PADRAO,
       prioridade: 'media' as PrioridadeOS,
       problemaInformado: '', // string serializada ('||') dos itens marcados no checklist
@@ -308,9 +302,9 @@ export default function NovaOrdemManutencao() {
   // por falta de uma caixinha que não existe empurra quem abre a OS a marcar
   // qualquer coisa só pra destravar, que é pior: contamina o dado.
   //
-  // "Vistoria Técnica" segue livre dos dois, porque por definição parte pra
-  // campo sem defeito identificado — é isso que a vistoria vai levantar.
-  const isVistoriaTecnica = form.tipo === 'Vistoria Técnica';
+  // Não há mais exceção: "Vistoria Técnica" era o tipo que abria sem defeito
+  // identificado, e ele saiu quando os cinco templates entraram — levantar
+  // pendência em campo agora é o módulo de Vistoria, que tem fluxo próprio.
   const temObservacao = form.observacoes.trim().length > 0;
   const temFoto = fotosIniciais.length > 0;
 
@@ -321,12 +315,7 @@ export default function NovaOrdemManutencao() {
   // OS depende só do texto pra dimensionar material e deslocamento, e a
   // categoria "Antes" fica sem par na hora de comprovar o serviço.
   //
-  // "Vistoria Técnica" continua fora das duas exigências, e agora com mais
-  // razão: ela é aberta ANTES de alguém ir ao local, então não há defeito
-  // identificado nem foto pra anexar. Exigir qualquer um dos dois ali
-  // impossibilitaria abrir uma vistoria — que é justamente o pedido de ir
-  // olhar.
-  const canContinueStep1 = isVistoriaTecnica || (motivoDescrito && temFoto);
+  const canContinueStep1 = motivoDescrito && temFoto;
   // Etapa 2 não tem mais campo obrigatório (Setor/Responsável vêm
   // pré-preenchidos do perfil de quem está abrindo, e continuam editáveis).
   const canContinueStep2 = true;
@@ -515,17 +504,20 @@ export default function NovaOrdemManutencao() {
                 Tipo de manutenção
               </label>
               <div className="grid grid-cols-2 gap-2">
-                {TIPOS.map((t) => (
+                {TIPOS_MANUTENCAO.map((t) => (
                   <button
                     key={t}
                     type="button"
-                    onClick={() => setForm((prev) => ({
-                      ...prev,
-                      tipo: t,
-                      // Vistoria é rotina, não urgência — preset só muda o
-                      // padrão inicial, o técnico continua livre pra trocar.
-                      prioridade: t === 'Vistoria Técnica' ? 'baixa' : prev.prioridade,
-                    }))}
+                    onClick={() => {
+                      if (t === form.tipo) return;
+                      // Cada template tem a sua árvore, então o que estava
+                      // marcado some junto — menos o que existir também na
+                      // árvore nova ('Cabo Solto' está em três delas), que
+                      // seria irritante remarcar depois de uma troca de tipo.
+                      const naNova = new Set(atividadesDoTipo(t).flatMap((g) => g.itens));
+                      setProblemasSelecionados((antes) => antes.filter((p) => naNova.has(p)));
+                      setForm((prev) => ({ ...prev, tipo: t }));
+                    }}
                     className={cn(
                       'text-sm font-semibold px-3 py-2.5 rounded-xl border text-left transition-colors',
                       form.tipo === t
@@ -606,26 +598,25 @@ export default function NovaOrdemManutencao() {
                     : 'nenhum marcado'}
                 </span>
               </div>
-              {isVistoriaTecnica && (
-                <p className="text-[11px] text-slate-600 dark:text-slate-300 -mt-1 mb-2">
-                  Marque só se já souber de algo específico — a vistoria em campo é o que vai levantar as pendências.
-                </p>
-              )}
               <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                {PROBLEMAS_CTO_GRUPOS.map((grupo) => (
-                  <div key={grupo.grupo}>
-                    <p className="text-[10px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 mb-1">
-                      {grupo.grupo}
-                    </p>
+                {atividadesDoTipo(form.tipo).map((grupo, g) => (
+                  <div key={grupo.grupo ?? g}>
+                    {/* Árvore curta não ganha título de seção: um cabeçalho
+                        sozinho em cima de três itens é só ruído. */}
+                    {grupo.grupo && (
+                      <p className="text-[10px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 mb-1">
+                        {grupo.grupo}
+                      </p>
+                    )}
                     <div className="space-y-2">
                       {grupo.itens.map((item, i) => (
                         <label
-                          key={i}
-                          htmlFor={`problema-${grupo.grupo}-${i}`}
+                          key={item}
+                          htmlFor={`atividade-${g}-${i}`}
                           className="flex items-start gap-2.5 cursor-pointer select-none"
                         >
                           <input
-                            id={`problema-${grupo.grupo}-${i}`}
+                            id={`atividade-${g}-${i}`}
                             type="checkbox"
                             checked={problemasSelecionados.includes(item)}
                             onChange={() => toggleProblema(item)}

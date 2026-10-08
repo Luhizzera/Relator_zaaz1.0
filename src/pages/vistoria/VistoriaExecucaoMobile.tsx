@@ -11,7 +11,7 @@ import {
 } from '@/lib/vistoriaOfflineQueue';
 import { getSignedFotoVistoriaUrl } from '@/lib/supabaseClient';
 import { OrdemVistoria, PendenciaVistoria, STATUS_VISTORIA_LABEL } from '@/types/vistoria';
-import { PROBLEMAS_CTO_GRUPOS, serializeProblemas, deserializeProblemas } from '@/types/manutencao';
+import { ATIVIDADES_VISTORIA, serializeProblemas, deserializeProblemas } from '@/types/manutencao';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
 import { BackButton } from '@/components/BackButton';
@@ -205,7 +205,9 @@ function NovaPendenciaModal({
           )}
 
           {/* Mesmo vocabulário do wizard de abertura de OS
-              (PROBLEMAS_CTO_GRUPOS): o que for marcado aqui vira ocorrência e
+              (ATIVIDADES_VISTORIA — as árvores de Preventiva CTO e de
+              Preventiva Rede Acesso, que são as corretivas que a vistoria
+              gera): o que for marcado aqui vira ocorrência e
               checklist de solução na corretiva, sem ninguém redigitar. Em
               chips e não em lista de checkbox porque isto é uma bottom sheet
               no celular, com foto e mapa acima — 14 linhas de checkbox
@@ -216,8 +218,8 @@ function NovaPendenciaModal({
               <span className="ml-1.5 font-normal normal-case text-slate-400">opcional</span>
             </label>
             <div className="space-y-2.5">
-              {PROBLEMAS_CTO_GRUPOS.map((grupo) => (
-                <div key={grupo.grupo}>
+              {ATIVIDADES_VISTORIA.map((grupo, g) => (
+                <div key={grupo.grupo ?? g}>
                   <p className="text-[10px] font-black uppercase tracking-wide text-slate-400 mb-1">{grupo.grupo}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {grupo.itens.map((item) => {
