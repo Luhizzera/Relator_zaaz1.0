@@ -12,7 +12,7 @@ import { listManutencaoOrders } from '@/lib/manutencaoService';
 import {
   ManutencaoOrdem, StatusOS, PrioridadeOS, STATUS_LABEL, PRIORIDADE_LABEL, tempoEmAtendimento,
 } from '@/types/manutencao';
-import { exportToXlsx } from '@/lib/xlsxExport';
+import { exportManutencaoXlsx } from '@/lib/manutencaoXlsx';
 import { PageHeader } from '@/components/PageHeader';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
@@ -499,36 +499,11 @@ export default function ManutencaoDashboard() {
   const handleExportarExcel = async () => {
     setExportando(true);
     try {
-      await exportToXlsx(
-        'ordens-manutencao',
-        'Ordens de Manutenção',
-        [
-          { header: 'Número', key: 'numero', width: 16 },
-          { header: 'Status', key: 'status', width: 20 },
-          { header: 'Prioridade', key: 'prioridade', width: 12 },
-          { header: 'Tipo', key: 'tipo', width: 20 },
-          { header: 'Solicitante', key: 'solicitante', width: 22 },
-          { header: 'Cidade', key: 'cidade', width: 18 },
-          { header: 'UTM', key: 'utm', width: 24 },
-          { header: 'Equipe', key: 'equipe', width: 16 },
-          { header: 'Técnico', key: 'tecnico', width: 20 },
-          { header: 'Abertura', key: 'abertura', width: 14, type: 'date' },
-          { header: 'Tempo em atendimento', key: 'tempo', width: 18 },
-        ],
-        ordersFiltradas.map((o) => ({
-          numero: o.numero,
-          status: STATUS_LABEL[o.status],
-          prioridade: PRIORIDADE_LABEL[o.prioridade],
-          tipo: o.tipo,
-          solicitante: o.solicitante,
-          cidade: o.municipio ?? '',
-          utm: o.latitude != null && o.longitude != null ? `${o.latitude.toFixed(6)}, ${o.longitude.toFixed(6)}` : '',
-          equipe: o.equipe ?? '',
-          tecnico: o.tecnico ?? '',
-          abertura: new Date(o.createdAt),
-          tempo: tempoEmAtendimento(o),
-        })),
-      );
+      await exportManutencaoXlsx(ordersFiltradas, {
+        escopo: ordersFiltradas.length === orders.length
+          ? 'todas as ordens visíveis'
+          : `recorte dos filtros da tela (${ordersFiltradas.length} de ${orders.length})`,
+      });
     } catch (err) {
       console.error('[Manutencao] Erro ao exportar Excel:', err);
       toast({ title: 'Não foi possível exportar', variant: 'destructive' });

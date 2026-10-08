@@ -12,7 +12,7 @@ import { listManutencaoOrders } from '@/lib/manutencaoService';
 import { listOrdensVistoria } from '@/lib/vistoriaService';
 import { listOrdensCertificacao } from '@/lib/certificacaoService';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
-import { exportToXlsx } from '@/lib/xlsxExport';
+import { exportManutencaoXlsx } from '@/lib/manutencaoXlsx';
 import { STATUS_LABEL as STATUS_LABEL_MANUTENCAO, PRIORIDADE_LABEL, tempoEmAtendimento } from '@/types/manutencao';
 import { STATUS_VISTORIA_LABEL } from '@/types/vistoria';
 import {
@@ -198,32 +198,9 @@ export default function Dashboard() {
   const handleExportarManutencaoExcel = async () => {
     setExportandoManutencao(true);
     try {
-      await exportToXlsx(
-        'ordens-manutencao',
-        'Ordens de Manutenção',
-        [
-          { header: 'Número', key: 'numero', width: 16 },
-          { header: 'Status', key: 'status', width: 20 },
-          { header: 'Prioridade', key: 'prioridade', width: 12 },
-          { header: 'Tipo', key: 'tipo', width: 20 },
-          { header: 'Solicitante', key: 'solicitante', width: 22 },
-          { header: 'Cidade', key: 'cidade', width: 18 },
-          { header: 'UTM', key: 'utm', width: 24 },
-          { header: 'Abertura', key: 'abertura', width: 14, type: 'date' },
-          { header: 'Tempo em atendimento', key: 'tempo', width: 18 },
-        ],
-        ordensManutencaoFiltradas.map((o) => ({
-          numero: o.numero,
-          status: STATUS_LABEL_MANUTENCAO[o.status],
-          prioridade: PRIORIDADE_LABEL[o.prioridade],
-          tipo: o.tipo,
-          solicitante: o.solicitante,
-          cidade: o.municipio ?? '',
-          utm: o.latitude != null && o.longitude != null ? `${o.latitude.toFixed(6)}, ${o.longitude.toFixed(6)}` : '',
-          abertura: new Date(o.createdAt),
-          tempo: tempoEmAtendimento(o),
-        })),
-      );
+      await exportManutencaoXlsx(ordensManutencaoFiltradas, {
+        escopo: 'recorte visível no painel do técnico',
+      });
     } catch (err) {
       console.error('[Dashboard] Erro ao exportar Excel de manutenção:', err);
       toast({ title: 'Não foi possível exportar', variant: 'destructive' });

@@ -19,6 +19,9 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import ExcelJS from 'exceljs';
 import {
+  ENCERRADOS, FORA_DO_FLUXO, matrizPorUf, vivas as somenteVivas,
+} from '../shared/relatorioManutencao.mjs';
+import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   WidthType, ShadingType, AlignmentType, BorderStyle, HeadingLevel,
   Header, Footer, PageNumber, convertMillimetersToTwip,
@@ -127,10 +130,6 @@ const STATUS_LABEL = {
 };
 const PRIORIDADE_LABEL = { baixa: 'Baixa', media: 'Média', alta: 'Alta', critica: 'Crítica' };
 
-/** Mesma definição de "concluídas" do dashboard (ManutencaoDashboard.tsx). */
-const ENCERRADOS = ['concluida', 'aprovada', 'finalizada'];
-const FORA_DO_FLUXO = [...ENCERRADOS, 'cancelada'];
-
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
   'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 const porExtenso = (d) => `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;
@@ -234,7 +233,7 @@ function apurar(ordens, agora) {
   // inteira. Elas seguem na planilha, com o rótulo "Cancelada", porque lá o
   // arquivo é registro e não painel — e é o mesmo recorte que o botão Excel da
   // tela de Ordens leva.
-  const vivas = ordens.filter((o) => o.status !== 'cancelada');
+  const vivas = somenteVivas(ordens);
 
   const porUf = {};
   for (const o of vivas) {
@@ -274,22 +273,8 @@ function apurar(ordens, agora) {
   //
   // A ordem das colunas é a mesma da tabela de regiões (maior volume primeiro),
   // pra quem lê não ter que reencontrar o estado a cada tabela.
-  const matriz = (chaveDe) => {
-    const porChave = new Map();
-    for (const o of vivas) {
-      const uf = o.uf || '—';
-      for (const [chave, quantidade] of chaveDe(o)) {
-        const linha = porChave.get(chave) ?? { chave, porUf: {}, total: 0 };
-        linha.porUf[uf] = (linha.porUf[uf] ?? 0) + quantidade;
-        linha.total += quantidade;
-        porChave.set(chave, linha);
-      }
-    }
-    return [...porChave.values()].sort((a, b) => b.total - a.total || a.chave.localeCompare(b.chave, 'pt-BR'));
-  };
-
-  const atividades = matriz((o) => o.atividades.map((a) => [a.atividade, a.quantidade]));
-  const tipos = matriz((o) => [[o.tipo, 1]]);
+  const atividades = matrizPorUf(vivas, (o) => o.atividades.map((a) => [a.atividade, a.quantidade]));
+  const tipos = matrizPorUf(vivas, (o) => [[o.tipo, 1]]);
 
   // O foco do panorama acompanha o problema em vez de ficar preso ao Paraná:
   // se a região travada mudar, o relatório aponta pra outra sozinho.

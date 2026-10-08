@@ -9,7 +9,7 @@ import {
   listManutencaoOrders, assignTecnico, duplicarOrdemManutencao, cancelarOrdem,
 } from '@/lib/manutencaoService';
 import { exportManutencaoPdf } from '@/lib/manutencaoPdfEngine';
-import { exportToXlsx } from '@/lib/xlsxExport';
+import { exportManutencaoXlsx } from '@/lib/manutencaoXlsx';
 import { ManutencaoOrdem, StatusOS, PrioridadeOS, STATUS_LABEL, PRIORIDADE_LABEL, tempoEmAtendimento } from '@/types/manutencao';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRealtimeRefresh } from '@/hooks/use-realtime-refresh';
@@ -260,42 +260,11 @@ export default function ManutencaoOrdersList() {
   const handleExportarExcel = async () => {
     setExportando(true);
     try {
-      await exportToXlsx(
-        'ordens-manutencao',
-        'Ordens de Manutenção',
-        [
-          { header: 'Número', key: 'numero', width: 16 },
-          { header: 'Status', key: 'status', width: 20 },
-          { header: 'Prioridade', key: 'prioridade', width: 12 },
-          { header: 'Solicitante', key: 'solicitante', width: 22 },
-          { header: 'UF', key: 'uf', width: 8 },
-          { header: 'Cidade', key: 'cidade', width: 18 },
-          { header: 'Bairro', key: 'bairro', width: 18 },
-          { header: 'Endereço', key: 'endereco', width: 30 },
-          { header: 'UTM', key: 'utm', width: 24 },
-          { header: 'Equipe', key: 'equipe', width: 16 },
-          { header: 'Técnico', key: 'tecnico', width: 20 },
-          { header: 'Prazo', key: 'prazo', width: 14, type: 'date' },
-          { header: 'Abertura', key: 'abertura', width: 14, type: 'date' },
-          { header: 'Tempo em atendimento', key: 'tempo', width: 18 },
-        ],
-        filtered.map((o) => ({
-          numero: o.numero,
-          status: STATUS_LABEL[o.status],
-          prioridade: PRIORIDADE_LABEL[o.prioridade],
-          solicitante: o.solicitante,
-          uf: (o.uf ?? '').toUpperCase(),
-          cidade: o.municipio ?? '',
-          bairro: o.bairro ?? '',
-          endereco: `${o.endereco ?? ''}${o.numeroEndereco ? `, ${o.numeroEndereco}` : ''}`,
-          utm: o.latitude != null && o.longitude != null ? `${o.latitude.toFixed(6)}, ${o.longitude.toFixed(6)}` : '',
-          equipe: o.equipe ?? '',
-          tecnico: o.tecnico ?? '',
-          prazo: o.dataPrevista ? new Date(o.dataPrevista) : null,
-          abertura: new Date(o.createdAt),
-          tempo: tempoEmAtendimento(o),
-        })),
-      );
+      await exportManutencaoXlsx(filtered, {
+        escopo: filtered.length === orders.length
+          ? 'todas as ordens visíveis'
+          : `recorte dos filtros da tela (${filtered.length} de ${orders.length})`,
+      });
     } catch (err) {
       console.error('[Manutencao] Erro ao exportar Excel:', err);
       toast({ title: 'Não foi possível exportar', variant: 'destructive' });
