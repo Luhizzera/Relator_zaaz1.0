@@ -20,6 +20,7 @@ import {
 import { listEquipes, listEquipesDoSupervisor } from '@/lib/manutencaoService';
 import { EquipeRow, ProfileRow } from '@/lib/supabaseClient';
 import { Modal } from '@/components/Modal';
+import { parseCoordenadas, formatarCoordenadas, pareceInvertido } from '@/lib/coordenadas';
 
 const STATUS_COLOR: Record<StatusOrdemCertificacao, string> = {
   aberta: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
@@ -41,14 +42,16 @@ interface PontoEmEdicao {
   chave: string;
   nomeCto: string;
   sinalEsperado: string;
-  coords: { lat: number; lng: number } | null;
+  /** O que está escrito no campo de UTM. As coordenadas são lidas daqui, e o
+   *  mapa, quando usado, escreve aqui — com uma fonte só os dois não divergem. */
+  utm: string;
 }
 
 const pontoVazio = (): PontoEmEdicao => ({
   chave: crypto.randomUUID(),
   nomeCto: '',
   sinalEsperado: '',
-  coords: null,
+  utm: '',
 });
 
 function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -88,12 +91,13 @@ function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; on
   // o técnico vai procurar em campo e conferir contra o powermeter.
   const pontosValidos: PontoPlanejado[] = pontos.flatMap((p) => {
     const esperado = parseDbm(p.sinalEsperado);
-    if (!p.nomeCto.trim() || esperado == null || !p.coords) return [];
+    const coords = parseCoordenadas(p.utm);
+    if (!p.nomeCto.trim() || esperado == null || !coords) return [];
     return [{
       nomeCto: p.nomeCto.trim(),
       sinalEsperadoDbm: esperado,
-      latitude: p.coords.lat,
-      longitude: p.coords.lng,
+      latitude: coords.lat,
+      longitude: coords.lng,
     }];
   });
   const pontosIncompletos = pontos.length - pontosValidos.length;
@@ -125,6 +129,7 @@ function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; on
   };
 
   const pontoDoMapa = pontos.find((p) => p.chave === mapaDoPonto);
+  const coordsDoPontoDoMapa = pontoDoMapa ? parseCoordenadas(pontoDoMapa.utm) : null;
 
   return (
     <>
@@ -255,22 +260,60 @@ function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; on
                       placeholder="Sinal esperado (-18,5)"
                       className="w-full min-w-0 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
                     />
-                    <button
-                      type="button"
-                      onClick={() => setMapaDoPonto(ponto.chave)}
-                      className={cn(
-                        'flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-xs font-bold transition-colors min-w-0',
-                        ponto.coords
-                          ? 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                          : 'border-dashed border-amber-400 text-amber-600 dark:text-amber-400',
-                      )}
-                    >
-                      <MapPin size={13} className="shrink-0" />
-                      <span className="truncate">
-                        {ponto.coords ? `${ponto.coords.lat.toFixed(5)}, ${ponto.coords.lng.toFixed(5)}` : 'Marcar no mapa'}
-                      </span>
-                    </button>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        value={ponto.utm}
+                        onChange={(e) => atualizarPonto(ponto.chave, { utm: e.target.value })}
+                        inputMode="text"
+                        placeholder="UTM: -23.86210, -49.14133"
+                        aria-label={`UTM da CTO ${i + 1}`}
+                        className={cn(
+                          'flex-1 min-w-0 px-2.5 py-2 text-xs rounded-lg border bg-white dark:bg-slate-800',
+                          ponto.utm.trim() && !parseCoordenadas(ponto.utm)
+                            ? 'border-red-400 dark:border-red-500'
+                            : 'border-slate-200 dark:border-slate-700',
+                        )}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setMapaDoPonto(ponto.chave)}
+                        title="Marcar no mapa"
+                        aria-label={`Marcar a CTO ${i + 1} no mapa`}
+                        className={cn(
+                          'flex items-center justify-center w-9 h-9 shrink-0 rounded-lg border transition-colors',
+                          parseCoordenadas(ponto.utm)
+                            ? 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'
+                            : 'border-dashed border-amber-400 text-amber-600 dark:text-amber-400',
+                        )}
+                      >
+                        <MapPin size={15} />
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Dois avisos de leitura, não de bloqueio: a coordenada pode
+                      estar certa e fora da área, mas quase nunca está. */}
+                  {ponto.utm.trim() && !parseCoordenadas(ponto.utm) && (
+                    <p className="text-[11px] font-semibold text-red-500">
+                      Não entendi essa coordenada. Use latitude e longitude separadas por vírgula,
+                      ou toque no pino para marcar no mapa.
+                    </p>
+                  )}
+                  {(() => {
+                    const coords = parseCoordenadas(ponto.utm);
+                    return coords && pareceInvertido(coords) ? (
+                      <button
+                        type="button"
+                        onClick={() => atualizarPonto(ponto.chave, {
+                          utm: formatarCoordenadas({ lat: coords.lng, lng: coords.lat }),
+                        })}
+                        className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 text-left"
+                      >
+                        Esse ponto cai fora do Brasil, mas cairia dentro se invertido —
+                        a latitude vem primeiro. Toque para inverter.
+                      </button>
+                    ) : null;
+                  })()}
                 </div>
               ))}
             </div>
@@ -286,8 +329,8 @@ function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; on
             {pontosIncompletos > 0 && (
               <p className="text-[11px] font-semibold text-red-500 mt-1.5">
                 {pontosIncompletos === 1
-                  ? 'Uma CTO está incompleta: precisa de nome, sinal esperado e ponto no mapa.'
-                  : `${pontosIncompletos} CTOs estão incompletas: cada uma precisa de nome, sinal esperado e ponto no mapa.`}
+                  ? 'Uma CTO está incompleta: precisa de nome, sinal esperado e UTM.'
+                  : `${pontosIncompletos} CTOs estão incompletas: cada uma precisa de nome, sinal esperado e UTM.`}
               </p>
             )}
           </div>
@@ -315,11 +358,11 @@ function NovaCertificacaoModal({ onClose, onCreated }: { onClose: () => void; on
               Onde fica {pontoDoMapa?.nomeCto.trim() || 'a CTO'}
             </p>
             <LocationMapPicker
-              initialLat={pontoDoMapa?.coords?.lat}
-              initialLng={pontoDoMapa?.coords?.lng}
+              initialLat={coordsDoPontoDoMapa?.lat}
+              initialLng={coordsDoPontoDoMapa?.lng}
               onCancel={() => setMapaDoPonto(null)}
               onConfirm={(lat, lng) => {
-                atualizarPonto(mapaDoPonto, { coords: { lat, lng } });
+                atualizarPonto(mapaDoPonto, { utm: formatarCoordenadas({ lat, lng }) });
                 setMapaDoPonto(null);
               }}
             />
