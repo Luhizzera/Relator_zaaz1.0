@@ -101,7 +101,7 @@ export async function buscarTudo<T>(
 /** Escrita (update/delete) filtrada por uma lista de ids, dividida pelo mesmo motivo do item 1. */
 export async function escreverPorIds(
   ids: string[],
-  escrever: (lote: string[]) => Promise<{ error: unknown }>,
+  escrever: (lote: string[]) => PromiseLike<{ error: unknown }>,
 ): Promise<void> {
   for (const lote of dividirEmLotes(ids)) {
     const { error } = await escrever(lote);

@@ -515,8 +515,13 @@ export default function NovaOrdemManutencao() {
                       // árvore nova ('Cabo Solto' está em três delas), que
                       // seria irritante remarcar depois de uma troca de tipo.
                       const naNova = new Set(atividadesDoTipo(t).flatMap((g) => g.itens));
-                      setProblemasSelecionados((antes) => antes.filter((p) => naNova.has(p)));
-                      setForm((prev) => ({ ...prev, tipo: t }));
+                      setForm((prev) => ({
+                        ...prev,
+                        tipo: t,
+                        problemaInformado: serializeProblemas(
+                          deserializeProblemas(prev.problemaInformado).filter((p) => naNova.has(p)),
+                        ),
+                      }));
                     }}
                     className={cn(
                       'text-sm font-semibold px-3 py-2.5 rounded-xl border text-left transition-colors',
@@ -581,16 +586,12 @@ export default function NovaOrdemManutencao() {
                       Rotular o checklist de "opcional" convidaria a pular
                       justamente a parte que estrutura o dado. */}
                   Problema informado{' '}
-                  {isVistoriaTecnica
-                    ? <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional nesta vistoria)</span>
-                    : <span className="text-red-500">*</span>}
+                  <span className="text-red-500">*</span>
                 </label>
                 <span className={cn(
                   'text-[10px] font-black px-1.5 py-0.5 rounded-full',
                   problemasSelecionados.length === 0
-                    ? isVistoriaTecnica
-                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
-                      : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                    ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
                     : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
                 )}>
                   {problemasSelecionados.length > 0
@@ -658,9 +659,8 @@ export default function NovaOrdemManutencao() {
             <div>
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 block">
                 Fotos do problema{' '}
-                {isVistoriaTecnica
-                  ? <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(opcional nesta vistoria, categoria "Antes")</span>
-                  : <><span className="text-red-500">*</span> <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(categoria "Antes")</span></>}
+                <span className="text-red-500">*</span>{' '}
+                <span className="font-normal normal-case text-slate-500 dark:text-slate-400">(categoria "Antes")</span>
               </label>
               <p className="text-[11px] text-slate-600 dark:text-slate-300 mb-2">
                 Ficam salvas na aba Fotos e o técnico de manutenção já vê como estava antes de ir a campo.
