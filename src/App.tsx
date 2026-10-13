@@ -1,6 +1,7 @@
 // @ts-nocheck
+import { useEffect, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { OrdersProvider } from '@/contexts/OrdersContext';
@@ -56,6 +57,57 @@ function HomeRoute() {
   return canManageOrders ? <ManutencaoDashboard /> : <Dashboard />;
 }
 
+/**
+ * As únicas telas que sobrevivem a uma nova entrada no app — ver
+ * `AbrirNoDashboard`.
+ *
+ * `/redefinir-senha` está aqui por um motivo diferente das outras: o link
+ * chega por e-mail com o token na própria URL, então redirecionar para o
+ * Dashboard mataria a recuperação de senha.
+ */
+const ROTAS_QUE_RESISTEM = [
+  /^\/manutencao\/ordens\/[^/]+\/execucao$/,
+  /^\/vistoria\/ordens\/[^/]+\/execucao$/,
+  /^\/redefinir-senha$/,
+];
+
+/**
+ * Ao entrar no app, leva para o Dashboard em vez de restaurar a última tela.
+ *
+ * O técnico fechava o app em qualquer lugar — numa OS que já tinha entregado,
+ * num filtro, numa foto ampliada — e no dia seguinte reabria exatamente ali,
+ * sem nada que explicasse por que estava naquela tela. O começo do turno é o
+ * Dashboard.
+ *
+ * A exceção é execução de OS: ali é trabalho em andamento, e perder o lugar
+ * custa caro para quem está em campo.
+ *
+ * Vale tanto para quem acabou de digitar a senha quanto para quem reabre o app
+ * com a sessão ainda válida, porque para quem usa os dois casos são "abri o
+ * app". Decide UMA vez por entrada — depois disso, navegar é com a pessoa — e
+ * volta a valer se a sessão cair e ela entrar de novo.
+ */
+function AbrirNoDashboard() {
+  const { session, loading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const jaDecidiu = useRef(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!session) { jaDecidiu.current = false; return; }
+    if (jaDecidiu.current) return;
+    jaDecidiu.current = true;
+
+    const caminho = location.pathname;
+    if (caminho === '/') return;
+    if (ROTAS_QUE_RESISTEM.some((rota) => rota.test(caminho))) return;
+    navigate('/', { replace: true });
+  }, [loading, session, location.pathname, navigate]);
+
+  return null;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -96,6 +148,7 @@ export default function App() {
       <AuthProvider>
         <OrdersProvider>
           <SidebarProvider>
+            <AbrirNoDashboard />
             <AppRoutes />
             <GlobalSidebar />
             <Toaster />
