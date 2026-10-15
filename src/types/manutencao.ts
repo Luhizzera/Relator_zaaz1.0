@@ -195,7 +195,7 @@ export const TIPOS_MANUTENCAO = [
   'Preventiva Rede Acesso (GPON)',
   'Preventiva CTO',
   'Identificação',
-  'Troca de Poste',
+  'Problemas de rede',
 ] as const;
 
 export type TipoManutencao = (typeof TIPOS_MANUTENCAO)[number];
@@ -316,7 +316,7 @@ export const ATIVIDADES_POR_TIPO: Record<TipoManutencao, GrupoDeAtividades[]> = 
     },
   ],
 
-  'Troca de Poste': [
+  'Problemas de rede': [
     {
       itens: [
         'Cabo Solto',
