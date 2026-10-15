@@ -468,6 +468,49 @@ function gerarDocx(m, agora, destino) {
     ],
   });
 
+  /**
+   * Matriz "linha x estado" no mesmo desenho da tabela de regiões acima:
+   * cabeçalho em faixa, rótulo à esquerda, números centralizados e total em
+   * destaque. As larguras são calculadas a partir das UFs que existirem no
+   * período, pelo mesmo motivo da outra tabela — fixar três colunas quebraria
+   * assim que uma região nova aparecesse.
+   *
+   * Zero vira ponto, e não "0": numa matriz esparsa a parede de zeros esconde
+   * justamente os números que interessam.
+   */
+  const matriz = (rotuloColuna, linhas) => {
+    const largRotulo = 4000;
+    const largTotal = 900;
+    const colUf = Math.floor((LARGURA - largRotulo - largTotal) / m.ufs.length);
+    const largs = [
+      largRotulo,
+      ...m.ufs.map((_, i) => (i === m.ufs.length - 1
+        ? LARGURA - largRotulo - largTotal - colUf * (m.ufs.length - 1) : colUf)),
+      largTotal,
+    ];
+    const centro = (texto, o = {}) => par(
+      [new TextRun({ text: String(texto), font: o.serif ? SERIF : SANS, size: o.size ?? 19, bold: o.bold, color: o.cor ?? INK })],
+      { after: 0, alignment: AlignmentType.CENTER },
+    );
+    return new Table({
+      columnWidths: largs, width: { size: LARGURA, type: WidthType.DXA },
+      rows: [
+        new TableRow({ children: [
+          cel(largs[0], [par([new TextRun({ text: rotuloColuna, font: SANS, size: 18, bold: true, color: 'FFFFFF' })], { after: 0 })], { fundo: TEAL }),
+          ...m.ufs.map((uf, i) => cel(largs[i + 1], [centro(uf, { serif: true, size: 22, bold: true, cor: 'FFFFFF' })], { fundo: TEAL })),
+          cel(largs[largs.length - 1], [centro('Total', { size: 18, bold: true, cor: 'FFFFFF' })], { fundo: TEAL }),
+        ] }),
+        ...linhas.map((l) => new TableRow({ children: [
+          cel(largs[0], [par([run(l.chave, { size: 19, color: SOFT })], { after: 0 })]),
+          ...m.ufs.map((uf, i) => cel(largs[i + 1], [
+            centro(l.porUf[uf] || '·', { cor: l.porUf[uf] ? INK : RULE }),
+          ])),
+          cel(largs[largs.length - 1], [centro(l.total, { serif: true, size: 22, bold: true })]),
+        ] })),
+      ],
+    });
+  };
+
   const f = m.foco;
   const fato = (largura, n, t) => cel(largura, [
     par([new TextRun({ text: n, font: SERIF, size: 30, bold: true, color: ALERTA })], { after: 30, line: 240 }),
@@ -546,6 +589,19 @@ function gerarDocx(m, agora, destino) {
             ? 'O registro foi realizado pelos técnicos de LA por meio do aplicativo; não há técnicos de rede cadastrados na região para delegação.'
             : 'A região já tem técnicos atuando, então o que resta é fila de delegação pendente, não falta de cadastro.'), { color: SOFT })], { after: 200 }),
         fatos,
+
+        new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 140 },
+          children: [new TextRun({ text: 'Ordens por tipo e estado', font: SERIF, size: 26, bold: true, color: INK })] }),
+        par([run('Distribuição das ordens pelos modelos de manutenção. Tipos anteriores aos modelos '
+          + 'atuais continuam listados, porque as ordens abertas sob eles mantêm o tipo com que nasceram.', { color: SOFT })], { after: 200 }),
+        matriz('Tipo de manutenção', m.tipos),
+
+        new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 140 },
+          children: [new TextRun({ text: 'Atividades por estado', font: SERIF, size: 26, bold: true, color: INK })] }),
+        par([run(`${plural(m.atividadesTotal, 'atividade registrada', 'atividades registradas')} nas `
+          + `${plural(m.total, 'ordem avaliada', 'ordens avaliadas')} — contadas na abertura da ordem e no que o `
+          + 'técnico acrescentou em campo. É este recorte que permite dimensionar equipe e material por região.', { color: SOFT })], { after: 200 }),
+        matriz('Atividade', m.atividades),
       ],
     }],
   });
