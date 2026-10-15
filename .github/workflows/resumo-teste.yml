@@ -1,0 +1,141 @@
+name: Resumo de atividade (teste)
+
+# Gêmeo manual do "Resumo de atividade", para conferir uma mudança ANTES de
+# ela chegar à diretoria.
+#
+# Duas diferenças, e são o motivo de este arquivo existir:
+#
+#   1. não envia e-mail por padrão — o resultado sai como artefato para
+#      download, então dá para olhar o corpo da mensagem, a planilha e o
+#      documento sem ocupar a caixa de ninguém;
+#   2. não commita nada no repositório, então rodar dez vezes seguidas não
+#      enche o histórico de "Resumo de atividade" nem mexe em
+#      `Resumo_atividade/`.
+#
+# Quem quiser testar também a ENTREGA preenche o campo "destinatario" ao
+# disparar: aí ele manda, mas só para esse endereço. É o caminho para
+# diagnosticar o bloqueio de IP do servidor de e-mail sem cobaia involuntária.
+on:
+  workflow_dispatch:
+    inputs:
+      destinatario:
+        description: 'Enviar também por e-mail para este endereço (deixe vazio para só gerar os arquivos)'
+        required: false
+        type: string
+        default: ''
+
+# Só leitura: ao contrário do workflow de produção, este não publica nada.
+permissions:
+  contents: read
+
+jobs:
+  testar:
+    runs-on: ubuntu-latest
+    env:
+      # O runner roda em UTC. Sem fixar o fuso, uma execução perto da virada do
+      # dia nomearia o arquivo com uma data e escreveria outra no cabeçalho.
+      TZ: America/Sao_Paulo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22, não 20: o @supabase/supabase-js declara `node: '>=22.0.0'` e
+          # usa o WebSocket global, que só existe a partir do 22.
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Gerar planilha, documento e corpo do e-mail
+        id: gerar
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          RESUMO_EMAIL: ${{ secrets.RESUMO_EMAIL }}
+          RESUMO_SENHA: ${{ secrets.RESUMO_SENHA }}
+        # `--saida saida` tira os arquivos de `Resumo_atividade/`: assim a
+        # árvore de trabalho não é tocada e não há risco de um teste virar
+        # commit por descuido.
+        run: node scripts/resumo-atividade.mjs --saida saida --sumario saida/corpo-email.html
+
+      # O resumo da execução poupa o download quando a pergunta é só "os
+      # números bateram?".
+      - name: Resumir na página da execução
+        run: |
+          {
+            echo "## Resumo gerado em ${{ steps.gerar.outputs.dataCompleta }}"
+            echo
+            echo "| Arquivo | Tamanho |"
+            echo "| --- | ---: |"
+            for f in saida/*; do
+              echo "| \`$(basename "$f")\` | $(du -h "$f" | cut -f1) |"
+            done
+            echo
+            echo "Baixe o artefato **resumo-teste** para abrir o documento e a planilha."
+            echo "O arquivo \`corpo-email.html\` é exatamente o que iria no corpo da mensagem."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar os arquivos como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: resumo-teste
+          path: saida/
+          retention-days: 7
+
+      # ── Envio opcional, só para o endereço informado ───────────────────────
+      # Mesma verificação do workflow de produção: um IP descartado pelo
+      # firewall custaria os 2 minutos do timeout do nodemailer; aqui custa 20
+      # segundos e o passo diz com todas as letras o que aconteceu.
+      - name: Conferir se este IP alcança o servidor
+        id: alcance
+        if: inputs.destinatario != ''
+        continue-on-error: true
+        shell: bash --noprofile --norc {0}
+        env:
+          HOST: ${{ secrets.SMTP_SERVIDOR }}
+          PORTA: ${{ secrets.SMTP_PORTA }}
+        run: |
+          ip=$(curl -s --max-time 10 https://api.ipify.org)
+          if timeout 20 bash -c "exec 3<>/dev/tcp/$HOST/$PORTA" 2>/dev/null; then
+            echo "IP \`$ip\` — alcançou o servidor" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "IP \`$ip\` — **descartado pelo firewall**. Rode de novo: cada execução sorteia um IP." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Localizar os anexos
+        id: anexos
+        if: inputs.destinatario != '' && steps.alcance.outcome == 'success'
+        run: |
+          echo "xlsx=$(ls saida/*.xlsx)" >> "$GITHUB_OUTPUT"
+          echo "docx=$(ls saida/*.docx)" >> "$GITHUB_OUTPUT"
+
+      - name: Enviar para o endereço de teste
+        id: envio
+        if: inputs.destinatario != '' && steps.alcance.outcome == 'success'
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVIDOR }}
+          server_port: ${{ secrets.SMTP_PORTA }}
+          # TLS implícito só na 465; na 587 o STARTTLS sobe a conexão depois.
+          secure: ${{ secrets.SMTP_PORTA == '465' }}
+          username: ${{ secrets.SMTP_USUARIO }}
+          password: ${{ secrets.SMTP_SENHA }}
+          from: SurveyOS (teste) <${{ secrets.SMTP_USUARIO }}>
+          # O endereço digitado no disparo, e NUNCA a lista de produção.
+          to: ${{ inputs.destinatario }}
+          subject: '[TESTE] Resumo de atividade — ${{ steps.gerar.outputs.dataCompleta }}'
+          html_body: file://saida/corpo-email.html
+          attachments: ${{ steps.anexos.outputs.xlsx }},${{ steps.anexos.outputs.docx }}
+          convert_markdown: false
+
+      - name: Registrar o desfecho do envio
+        if: inputs.destinatario != ''
+        run: |
+          if [ '${{ steps.envio.outcome }}' = 'success' ]; then
+            echo "Mensagem de teste entregue a \`${{ inputs.destinatario }}\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Não foi possível entregar a \`${{ inputs.destinatario }}\` nesta tentativa — os arquivos continuam no artefato." >> "$GITHUB_STEP_SUMMARY"
+          fi
