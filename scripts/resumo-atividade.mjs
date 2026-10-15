@@ -590,7 +590,10 @@ function gerarDocx(m, agora, destino) {
             : 'A região já tem técnicos atuando, então o que resta é fila de delegação pendente, não falta de cadastro.'), { color: SOFT })], { after: 200 }),
         fatos,
 
-        new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 400, after: 140 },
+        // Quebra explícita: sem ela o título e a primeira linha da tabela
+        // ficavam no rodapé da página 1 e o resto virava, partindo a leitura
+        // bem no começo. As duas matrizes abrem a segunda página juntas.
+        new Paragraph({ heading: HeadingLevel.HEADING_2, pageBreakBefore: true, spacing: { after: 140 },
           children: [new TextRun({ text: 'Ordens por tipo e estado', font: SERIF, size: 26, bold: true, color: INK })] }),
         par([run('Distribuição das ordens pelos modelos de manutenção. Tipos anteriores aos modelos '
           + 'atuais continuam listados, porque as ordens abertas sob eles mantêm o tipo com que nasceram.', { color: SOFT })], { after: 200 }),
